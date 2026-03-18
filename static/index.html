@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Gauntlet — AI RPG</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --orange: #FF6B35;
+            --dark-bg: #1a2332;
+            --darker-bg: #0f1419;
+            --card-bg: #1e2d3d;
+            --light-text: #ffffff;
+            --gray-text: #a0aec0;
+            --error: #ff4444;
+            --success: #22c55e;
+            --gold: #fbbf24;
+            --purple: #a78bfa;
+        }
+        body {
+            font-family: 'Georgia', 'Times New Roman', serif;
+            line-height: 1.7;
+            color: var(--light-text);
+            background: var(--darker-bg);
+            min-height: 100vh;
+        }
+
+        /* Header */
+        header {
+            background: var(--dark-bg);
+            padding: 1rem 2rem;
+            border-bottom: 2px solid var(--orange);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header-title {
+            font-size: 1.5rem;
+            color: var(--orange);
+            font-weight: bold;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+        .header-right { display: flex; align-items: center; gap: 1rem; }
+        .header-right span { color: var(--gray-text); font-size: 0.9rem; }
+        .btn-logout {
+            background: none;
+            border: 1px solid var(--gray-text);
+            color: var(--gray-text);
+            padding: 0.4rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+        .btn-logout:hover { border-color: var(--orange); color: var(--orange); }
+
+        /* Loading */
+        .loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 20, 25, 0.95);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        .loading-overlay.hidden { display: none; }
+        .spinner {
+            width: 48px; height: 48px;
+            border: 4px solid rgba(255, 107, 53, 0.2);
+            border-top-color: var(--orange);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text {
+            margin-top: 1.5rem;
+            color: var(--gray-text);
+            font-size: 1.1rem;
+            text-align: center;
+            max-width: 340px;
+        }
+
+        /* Page states */
+        .page { display: none; }
+        .page.active { display: block; }
+
+        /* ===== LANDING ===== */
+        .landing { max-width: 900px; margin: 0 auto; padding: 3rem 2rem; }
+        .landing-hero { text-align: center; margin-bottom: 3rem; }
+        .landing-hero h1 { font-size: 3rem; color: var(--orange); margin-bottom: 0.5rem; letter-spacing: 3px; }
+        .landing-hero p { color: var(--gray-text); font-size: 1.2rem; max-width: 600px; margin: 0 auto; }
+        .btn-new-game {
+            display: inline-block; background: var(--orange); color: white;
+            padding: 1rem 2.5rem; border: none; border-radius: 8px;
+            font-size: 1.2rem; cursor: pointer; margin-top: 2rem;
+            font-family: inherit; letter-spacing: 1px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .btn-new-game:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(255,107,53,0.3); }
+        .saved-games h2 {
+            color: var(--gray-text); font-size: 1.1rem;
+            text-transform: uppercase; letter-spacing: 2px; margin-bottom: 1rem;
+        }
+        .game-card {
+            background: var(--card-bg); border: 1px solid rgba(255,107,53,0.15);
+            border-radius: 10px; padding: 1.25rem 1.5rem; margin-bottom: 0.75rem;
+            cursor: pointer; transition: border-color 0.2s, transform 0.2s;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .game-card:hover { border-color: var(--orange); transform: translateX(4px); }
+        .game-card-info h3 { font-size: 1.15rem; }
+        .game-card-meta { color: var(--gray-text); font-size: 0.85rem; margin-top: 0.25rem; }
+        .game-card-status {
+            font-size: 0.8rem; padding: 0.2rem 0.7rem; border-radius: 12px;
+            text-transform: uppercase; letter-spacing: 1px;
+        }
+        .status-active { background: rgba(34,197,94,0.15); color: var(--success); }
+        .status-completed { background: rgba(251,191,36,0.15); color: var(--gold); }
+        .status-abandoned { background: rgba(160,174,192,0.15); color: var(--gray-text); }
+        .no-games { text-align: center; color: var(--gray-text); padding: 2rem; font-style: italic; }
+
+        /* ===== SEED FORM ===== */
+        .seed-form { max-width: 700px; margin: 0 auto; padding: 3rem 2rem; }
+        .seed-form h1 { color: var(--orange); text-align: center; margin-bottom: 0.5rem; font-size: 2rem; }
+        .seed-form .subtitle { text-align: center; color: var(--gray-text); margin-bottom: 2.5rem; }
+        .form-group { margin-bottom: 1.5rem; }
+        .form-group label {
+            display: block; color: var(--gray-text); margin-bottom: 0.5rem;
+            font-size: 0.95rem; text-transform: uppercase; letter-spacing: 1px;
+        }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; padding: 0.75rem 1rem; background: var(--darker-bg);
+            border: 1px solid rgba(255,107,53,0.2); border-radius: 8px;
+            color: var(--light-text); font-size: 1rem; font-family: inherit;
+        }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+            outline: none; border-color: var(--orange);
+        }
+        .form-group select { cursor: pointer; }
+        .form-group select option { background: var(--darker-bg); }
+        .char-block {
+            background: var(--card-bg); border: 1px solid rgba(255,107,53,0.1);
+            border-radius: 8px; padding: 1.25rem; margin-bottom: 1rem;
+        }
+        .char-block h3 { color: var(--orange); font-size: 0.95rem; margin-bottom: 0.75rem; }
+        .char-row { display: grid; grid-template-columns: 1fr 2fr; gap: 0.75rem; }
+        .btn-add-char {
+            background: none; border: 1px dashed var(--gray-text); color: var(--gray-text);
+            padding: 0.75rem; border-radius: 8px; cursor: pointer; width: 100%;
+            font-family: inherit; font-size: 0.95rem;
+        }
+        .btn-add-char:hover { border-color: var(--orange); color: var(--orange); }
+        .btn-remove-char { background: none; border: none; color: var(--error); cursor: pointer; font-size: 0.85rem; float: right; }
+        .form-actions { display: flex; gap: 1rem; margin-top: 2rem; }
+        .btn-back {
+            background: none; border: 1px solid var(--gray-text); color: var(--gray-text);
+            padding: 0.85rem 1.75rem; border-radius: 8px; cursor: pointer; font-family: inherit; font-size: 1rem;
+        }
+        .btn-back:hover { border-color: var(--orange); color: var(--orange); }
+        .btn-create {
+            flex: 1; background: var(--orange); color: white; padding: 0.85rem 1.75rem;
+            border: none; border-radius: 8px; cursor: pointer; font-family: inherit;
+            font-size: 1.1rem; letter-spacing: 1px;
+        }
+        .btn-create:hover { box-shadow: 0 4px 15px rgba(255,107,53,0.3); }
+        .btn-create:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* ===== GAME PLAY ===== */
+        .game-layout {
+            display: grid; grid-template-columns: 1fr 280px;
+            max-width: 1200px; margin: 0 auto; min-height: calc(100vh - 70px);
+        }
+        .game-main { padding: 2rem; overflow-y: auto; }
+        .game-sidebar {
+            background: var(--dark-bg); border-left: 1px solid rgba(255,107,53,0.2);
+            padding: 1.5rem; overflow-y: auto;
+        }
+
+        .scene-image {
+            width: 100%; aspect-ratio: 16/9; border-radius: 12px;
+            overflow: hidden; margin-bottom: 1.5rem; background: var(--card-bg);
+        }
+        .scene-image img { width: 100%; height: 100%; object-fit: cover; }
+        .scene-image-placeholder {
+            width: 100%; height: 100%; display: flex; align-items: center;
+            justify-content: center; color: var(--gray-text); font-style: italic;
+        }
+
+        .narration {
+            background: var(--card-bg); border-radius: 10px; padding: 1.5rem 2rem;
+            margin-bottom: 1.5rem; border-left: 3px solid var(--orange);
+            font-size: 1.05rem; line-height: 1.8; white-space: pre-wrap;
+        }
+        .narration-audio { margin-top: 1rem; display: flex; align-items: center; gap: 0.75rem; }
+
+        .btn-play {
+            background: var(--orange); color: white; border: none;
+            width: 36px; height: 36px; border-radius: 50%; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.9rem; flex-shrink: 0;
+        }
+        .btn-play:hover { box-shadow: 0 2px 10px rgba(255,107,53,0.4); }
+        .btn-play.playing { background: var(--success); }
+
+        .btn-play-all {
+            background: var(--purple); color: white; border: none;
+            padding: 0.5rem 1.25rem; border-radius: 20px; cursor: pointer;
+            font-family: inherit; font-size: 0.9rem; margin-bottom: 1.5rem;
+        }
+        .btn-play-all:hover { box-shadow: 0 2px 10px rgba(167,139,250,0.4); }
+        .btn-play-all:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .dialogue-line {
+            display: flex; align-items: flex-start; gap: 0.75rem;
+            margin-bottom: 0.75rem; padding: 0.75rem 1rem;
+            background: rgba(167,139,250,0.06); border-radius: 8px;
+            border-left: 3px solid var(--purple);
+        }
+        .dialogue-name { color: var(--purple); font-weight: bold; min-width: 100px; font-size: 0.95rem; }
+        .dialogue-text { flex: 1; font-style: italic; }
+
+        .choices { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 2rem; margin-bottom: 2rem; }
+        .choices h3 { color: var(--gold); font-size: 0.95rem; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 0.25rem; }
+        .btn-choice {
+            background: var(--card-bg); border: 2px solid rgba(251,191,36,0.2);
+            color: var(--light-text); padding: 1rem 1.5rem; border-radius: 10px;
+            cursor: pointer; font-family: inherit; font-size: 1rem;
+            text-align: left; transition: all 0.2s; line-height: 1.5;
+        }
+        .btn-choice:hover { border-color: var(--gold); background: rgba(251,191,36,0.08); transform: translateX(6px); }
+        .btn-choice:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .btn-choice.selected { border-color: var(--gold); background: rgba(251,191,36,0.15); }
+        .choice-number { color: var(--gold); font-weight: bold; margin-right: 0.5rem; }
+
+        /* Sidebar */
+        .sidebar-panel { margin-bottom: 1.5rem; }
+        .sidebar-panel h3 {
+            color: var(--orange); font-size: 0.85rem; text-transform: uppercase;
+            letter-spacing: 2px; margin-bottom: 0.75rem; padding-bottom: 0.5rem;
+            border-bottom: 1px solid rgba(255,107,53,0.2);
+        }
+        .sidebar-location { font-size: 0.95rem; margin-bottom: 0.25rem; }
+        .sidebar-location-desc { color: var(--gray-text); font-size: 0.85rem; }
+        .sidebar-list { list-style: none; }
+        .sidebar-list li { color: var(--gray-text); font-size: 0.9rem; padding: 0.3rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .sidebar-list li:last-child { border-bottom: none; }
+        .sidebar-char-name { color: var(--purple); }
+        .sidebar-char-status { font-size: 0.8rem; color: var(--gray-text); margin-left: 0.5rem; }
+        .sidebar-item { color: var(--gold); }
+        .sidebar-turn-count { font-size: 2rem; color: var(--orange); font-weight: bold; }
+
+        .btn-sidebar {
+            background: none; border: 1px solid var(--gray-text); color: var(--gray-text);
+            padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer;
+            font-family: inherit; font-size: 0.85rem; width: 100%; margin-top: 0.5rem;
+        }
+        .btn-sidebar:hover { border-color: var(--orange); color: var(--orange); }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+            display: flex; align-items: center; justify-content: center; z-index: 1000;
+        }
+        .modal-overlay.hidden { display: none; }
+        .modal {
+            background: var(--dark-bg); border: 1px solid rgba(255,107,53,0.2);
+            border-radius: 12px; padding: 2rem; width: 90%; max-width: 700px; max-height: 80vh; overflow-y: auto;
+        }
+        .modal h2 { color: var(--orange); margin-bottom: 1.5rem; }
+        .modal-close { float: right; background: none; border: none; color: var(--gray-text); font-size: 1.5rem; cursor: pointer; }
+        .modal-close:hover { color: var(--orange); }
+        .history-turn { border-bottom: 1px solid rgba(255,255,255,0.05); padding: 1rem 0; }
+        .history-turn:last-child { border-bottom: none; }
+        .history-turn-header { color: var(--orange); font-weight: bold; margin-bottom: 0.5rem; }
+        .history-turn-text { color: var(--gray-text); font-size: 0.9rem; line-height: 1.6; max-height: 100px; overflow: hidden; }
+        .history-choice { color: var(--gold); font-size: 0.85rem; margin-top: 0.5rem; font-style: italic; }
+
+        @media (max-width: 768px) {
+            .game-layout { grid-template-columns: 1fr; }
+            .game-sidebar { border-left: none; border-top: 1px solid rgba(255,107,53,0.2); }
+            .landing-hero h1 { font-size: 2rem; }
+            .char-row { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="header-title">The Gauntlet</div>
+    <div class="header-right">
+        <span id="user-email"></span>
+        <button class="btn-logout" onclick="logout()">Logout</button>
+    </div>
+</header>
+
+<div class="loading-overlay hidden" id="loading">
+    <div class="spinner"></div>
+    <div class="loading-text" id="loading-text">Loading...</div>
+</div>
+
+<!-- LANDING -->
+<div class="page active" id="page-landing">
+    <div class="landing">
+        <div class="landing-hero">
+            <h1>The Gauntlet</h1>
+            <p>A voice-driven AI RPG. Every world is unique. Every choice matters. Every character speaks.</p>
+            <button class="btn-new-game" onclick="showPage('page-seed')">Begin New Adventure</button>
+        </div>
+        <div class="saved-games">
+            <h2>Your Adventures</h2>
+            <div id="saved-games-list"></div>
+        </div>
+    </div>
+</div>
+
+<!-- SEED FORM -->
+<div class="page" id="page-seed">
+    <div class="seed-form">
+        <h1>Forge Your World</h1>
+        <p class="subtitle">Define the setting, tone, and characters for your adventure.</p>
+        <form id="seed-form" onsubmit="createGame(event)">
+            <div class="form-group">
+                <label>Setting</label>
+                <input type="text" id="setting" placeholder="e.g., A dying desert kingdom, A cyberpunk megacity, A haunted Victorian manor" required>
+            </div>
+            <div class="form-group">
+                <label>Tone</label>
+                <select id="tone" required>
+                    <option value="">Choose a tone...</option>
+                    <option value="heroic">Heroic — Epic and triumphant</option>
+                    <option value="grimdark">Grimdark — Dark and unforgiving</option>
+                    <option value="whimsical">Whimsical — Lighthearted and magical</option>
+                    <option value="noir">Noir — Cynical and atmospheric</option>
+                    <option value="horror">Horror — Dread and suspense</option>
+                    <option value="comedic">Comedic — Funny and irreverent</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Genre</label>
+                <select id="genre" required>
+                    <option value="">Choose a genre...</option>
+                    <option value="fantasy">Fantasy</option>
+                    <option value="sci-fi">Sci-Fi</option>
+                    <option value="post-apocalyptic">Post-Apocalyptic</option>
+                    <option value="steampunk">Steampunk</option>
+                    <option value="mythology">Mythology</option>
+                    <option value="western">Western</option>
+                    <option value="pirate">Pirate</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Characters (1-3)</label>
+                <div id="characters-container">
+                    <div class="char-block" data-index="0">
+                        <h3>Character 1</h3>
+                        <div class="char-row">
+                            <input type="text" placeholder="Name" class="char-name" required>
+                            <input type="text" placeholder="Brief description (e.g., a scarred bounty hunter)" class="char-desc" required>
+                        </div>
+                    </div>
+                </div>
+                <button type="button" class="btn-add-char" id="btn-add-char" onclick="addCharacter()">+ Add Character</button>
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn-back" onclick="showPage('page-landing')">Back</button>
+                <button type="submit" class="btn-create" id="btn-create">Enter The Gauntlet</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- GAME PLAY -->
+<div class="page" id="page-game">
+    <div class="game-layout">
+        <div class="game-main" id="game-main">
+            <div class="scene-image" id="scene-image">
+                <div class="scene-image-placeholder">Scene loading...</div>
+            </div>
+            <button class="btn-play-all" id="btn-play-all" onclick="playAllAudio()">Play All Audio</button>
+            <div class="narration" id="narration"></div>
+            <div class="dialogue-section" id="dialogue-section"></div>
+            <div class="choices" id="choices-section">
+                <h3>What do you do?</h3>
+                <div id="choices-buttons"></div>
+            </div>
+        </div>
+        <div class="game-sidebar">
+            <div class="sidebar-panel">
+                <h3>Location</h3>
+                <div class="sidebar-location" id="sidebar-location">-</div>
+                <div class="sidebar-location-desc" id="sidebar-location-desc"></div>
+            </div>
+            <div class="sidebar-panel">
+                <h3>Characters Present</h3>
+                <ul class="sidebar-list" id="sidebar-characters"></ul>
+            </div>
+            <div class="sidebar-panel">
+                <h3>Inventory</h3>
+                <ul class="sidebar-list" id="sidebar-inventory"><li style="font-style:italic;">Empty</li></ul>
+            </div>
+            <div class="sidebar-panel">
+                <h3>Turn</h3>
+                <div class="sidebar-turn-count" id="sidebar-turn">0</div>
+            </div>
+            <button class="btn-sidebar" onclick="showHistory()">View Turn History</button>
+            <button class="btn-sidebar" onclick="backToMenu()">Back to Menu</button>
+        </div>
+    </div>
+</div>
+
+<!-- HISTORY MODAL -->
+<div class="modal-overlay hidden" id="history-modal">
+    <div class="modal">
+        <button class="modal-close" onclick="hideHistory()">&times;</button>
+        <h2>Turn History</h2>
+        <div id="history-content"></div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/dist/umd/supabase.min.js"></script>
+<script src="/api/config.js"></script>
+<script>
+    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    let currentUser = null;
+    let currentGameId = null;
+    let currentGameData = null;
+    let currentAudio = null;
+    let isPlayingAll = false;
+
+    // ===== AUTH =====
+    async function getHeaders() {
+        const { data: { session } } = await sb.auth.getSession();
+        if (!session) { window.location.href = '/login'; return null; }
+        return { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' };
+    }
+
+    async function checkAuth() {
+        const { data: { session } } = await sb.auth.getSession();
+        if (!session) { window.location.href = '/login'; return; }
+        currentUser = session.user;
+        document.getElementById('user-email').textContent = currentUser.email;
+        await loadSavedGames();
+    }
+
+    async function logout() {
+        await sb.auth.signOut();
+        window.location.href = '/login';
+    }
+
+    // ===== API =====
+    async function api(method, path, body = null) {
+        const headers = await getHeaders();
+        if (!headers) return null;
+        const opts = { method, headers };
+        if (body) opts.body = JSON.stringify(body);
+        const resp = await fetch(path, opts);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || `Request failed (${resp.status})`);
+        return data;
+    }
+
+    // ===== LOADING =====
+    function showLoading(text = 'Loading...') {
+        document.getElementById('loading-text').textContent = text;
+        document.getElementById('loading').classList.remove('hidden');
+    }
+    function hideLoading() { document.getElementById('loading').classList.add('hidden'); }
+
+    // ===== PAGES =====
+    function showPage(id) {
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+    }
+
+    function backToMenu() {
+        stopAudio();
+        currentGameId = null;
+        currentGameData = null;
+        showPage('page-landing');
+        loadSavedGames();
+    }
+
+    // ===== SAVED GAMES =====
+    async function loadSavedGames() {
+        try {
+            const data = await api('GET', '/api/games');
+            const games = data.games || [];
+            const el = document.getElementById('saved-games-list');
+            if (!games.length) {
+                el.innerHTML = '<div class="no-games">No adventures yet. Begin your first journey above.</div>';
+                return;
+            }
+            el.innerHTML = games.map(g => `
+                <div class="game-card" onclick="loadGame('${g.id}')">
+                    <div class="game-card-info">
+                        <h3>${esc(g.title)}</h3>
+                        <div class="game-card-meta">${esc(g.setting)} &middot; ${esc(g.tone)} &middot; ${esc(g.genre)}</div>
+                    </div>
+                    <span class="game-card-status status-${g.status}">${g.status}</span>
+                </div>
+            `).join('');
+        } catch (e) { console.error('Load games failed:', e); }
+    }
+
+    // ===== CHARACTERS FORM =====
+    let charCount = 1;
+    function addCharacter() {
+        if (charCount >= 3) return;
+        const c = document.getElementById('characters-container');
+        const div = document.createElement('div');
+        div.className = 'char-block';
+        div.innerHTML = `
+            <h3>Character ${charCount + 1} <button type="button" class="btn-remove-char" onclick="removeCharacter(this)">&times; Remove</button></h3>
+            <div class="char-row">
+                <input type="text" placeholder="Name" class="char-name" required>
+                <input type="text" placeholder="Brief description" class="char-desc" required>
+            </div>`;
+        c.appendChild(div);
+        charCount++;
+        if (charCount >= 3) document.getElementById('btn-add-char').style.display = 'none';
+    }
+    function removeCharacter(btn) {
+        btn.closest('.char-block').remove();
+        charCount--;
+        document.getElementById('btn-add-char').style.display = '';
+        document.querySelectorAll('.char-block h3').forEach((h, i) => {
+            const rb = h.querySelector('.btn-remove-char');
+            h.textContent = `Character ${i + 1} `;
+            if (rb) h.appendChild(rb);
+        });
+    }
+
+    // ===== CREATE GAME =====
+    async function createGame(e) {
+        e.preventDefault();
+        const btn = document.getElementById('btn-create');
+        btn.disabled = true;
+        const characters = [];
+        document.querySelectorAll('.char-block').forEach(b => {
+            const name = b.querySelector('.char-name').value.trim();
+            const desc = b.querySelector('.char-desc').value.trim();
+            if (name) characters.push({ name, description: desc });
+        });
+        showLoading('Forging your world... Claude is weaving the story, generating art, and voicing characters. This may take 30-60 seconds.');
+        try {
+            const data = await api('POST', '/api/games', {
+                setting: document.getElementById('setting').value.trim(),
+                tone: document.getElementById('tone').value,
+                genre: document.getElementById('genre').value,
+                characters
+            });
+            currentGameId = data.game.id;
+            currentGameData = data;
+            renderGame(data);
+            showPage('page-game');
+        } catch (e) { alert('Failed to create game: ' + e.message); }
+        finally { hideLoading(); btn.disabled = false; }
+    }
+
+    // ===== LOAD GAME =====
+    async function loadGame(gameId) {
+        showLoading('Loading your adventure...');
+        try {
+            const data = await api('GET', `/api/games/${gameId}`);
+            currentGameId = gameId;
+            currentGameData = data;
+            renderGame(data);
+            showPage('page-game');
+        } catch (e) { alert('Failed to load game: ' + e.message); }
+        finally { hideLoading(); }
+    }
+
+    // ===== SUBMIT CHOICE =====
+    async function submitChoice(choice) {
+        document.querySelectorAll('.btn-choice').forEach(b => b.disabled = true);
+        document.querySelectorAll('.btn-choice')[choice - 1].classList.add('selected');
+        showLoading('The story unfolds... processing your choice, generating new scene art and voice acting.');
+        try {
+            const data = await api('POST', `/api/games/${currentGameId}/turns`, { choice });
+            currentGameData = data;
+            renderGame(data);
+            document.getElementById('game-main').scrollTop = 0;
+        } catch (e) {
+            alert('Turn failed: ' + e.message);
+            document.querySelectorAll('.btn-choice').forEach(b => b.disabled = false);
+        }
+        finally { hideLoading(); }
+    }
+
+    // ===== RENDER =====
+    function renderGame(data) {
+        const turn = data.turn;
+        const game = data.game;
+        if (!turn) return;
+        const state = turn.game_state || {};
+
+        // Image
+        const imgEl = document.getElementById('scene-image');
+        imgEl.innerHTML = turn.image_url
+            ? `<img src="${turn.image_url}" alt="Scene">`
+            : '<div class="scene-image-placeholder">No scene image</div>';
+
+        // Narration
+        const narEl = document.getElementById('narration');
+        narEl.innerHTML = esc(turn.narration_text || '');
+        if (turn.narration_audio_url) {
+            narEl.innerHTML += `<div class="narration-audio">
+                <button class="btn-play" onclick="playAudio('${turn.narration_audio_url}', this)">&#9654;</button>
+                <span style="color:var(--gray-text);font-size:0.85rem;">Listen to narration</span>
+            </div>`;
+        }
+
+        // Dialogue
+        const dlgEl = document.getElementById('dialogue-section');
+        const dialogue = turn.dialogue || [];
+        dlgEl.innerHTML = dialogue.map(d => `
+            <div class="dialogue-line">
+                ${d.audio_url ? `<button class="btn-play" onclick="playAudio('${d.audio_url}', this)">&#9654;</button>` : ''}
+                <span class="dialogue-name">${esc(d.character_name)}:</span>
+                <span class="dialogue-text">"${esc(d.line)}"</span>
+            </div>`).join('');
+
+        // Play All
+        const hasAudio = turn.narration_audio_url || dialogue.some(d => d.audio_url);
+        document.getElementById('btn-play-all').style.display = hasAudio ? '' : 'none';
+
+        // Choices
+        const choices = turn.choices || [];
+        const choicesEl = document.getElementById('choices-buttons');
+        const canChoose = game.status === 'active' && !turn.player_choice;
+        if (choices.length && canChoose) {
+            document.getElementById('choices-section').style.display = '';
+            choicesEl.innerHTML = choices.map((c, i) =>
+                `<button class="btn-choice" onclick="submitChoice(${i+1})"><span class="choice-number">${i+1}.</span> ${esc(c)}</button>`
+            ).join('');
+        } else {
+            document.getElementById('choices-section').style.display = turn.player_choice ? '' : 'none';
+            if (turn.player_choice && choices.length) {
+                choicesEl.innerHTML = `<div style="color:var(--gold);font-style:italic;">You chose: ${esc(choices[turn.player_choice-1]||'')}</div>`;
+            }
+        }
+
+        // Sidebar
+        const loc = state.location || {};
+        document.getElementById('sidebar-location').textContent = loc.name || 'Unknown';
+        document.getElementById('sidebar-location-desc').textContent = loc.description || '';
+
+        const chars = state.characters_present || [];
+        document.getElementById('sidebar-characters').innerHTML = chars.length
+            ? chars.map(c => `<li><span class="sidebar-char-name">${esc(c.name)}</span><span class="sidebar-char-status">${esc(c.status||'')} &middot; ${esc(c.disposition||'')}</span></li>`).join('')
+            : '<li style="font-style:italic;">None nearby</li>';
+
+        const inv = state.inventory || [];
+        document.getElementById('sidebar-inventory').innerHTML = inv.length
+            ? inv.map(i => `<li><span class="sidebar-item">${esc(i)}</span></li>`).join('')
+            : '<li style="font-style:italic;">Empty</li>';
+
+        document.getElementById('sidebar-turn').textContent = state.turn_count ?? turn.turn_number ?? 0;
+    }
+
+    // ===== AUDIO =====
+    function stopAudio() {
+        if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+        isPlayingAll = false;
+        document.querySelectorAll('.btn-play.playing').forEach(b => b.classList.remove('playing'));
+        const btn = document.getElementById('btn-play-all');
+        if (btn) btn.disabled = false;
+    }
+
+    function playAudio(url, btnEl) {
+        stopAudio();
+        if (!url) return;
+        currentAudio = new Audio(url);
+        if (btnEl) btnEl.classList.add('playing');
+        currentAudio.onended = () => { if (btnEl) btnEl.classList.remove('playing'); currentAudio = null; };
+        currentAudio.onerror = () => { if (btnEl) btnEl.classList.remove('playing'); currentAudio = null; };
+        currentAudio.play().catch(e => console.error('Audio play failed:', e));
+    }
+
+    async function playAllAudio() {
+        stopAudio();
+        isPlayingAll = true;
+        document.getElementById('btn-play-all').disabled = true;
+        const turn = currentGameData?.turn;
+        if (!turn) return;
+
+        const queue = [];
+        if (turn.narration_audio_url) queue.push({ url: turn.narration_audio_url, type: 'narration' });
+        (turn.dialogue || []).forEach((d, i) => { if (d.audio_url) queue.push({ url: d.audio_url, type: 'dialogue', index: i }); });
+
+        for (const item of queue) {
+            if (!isPlayingAll) break;
+            await new Promise(resolve => {
+                const audio = new Audio(item.url);
+                currentAudio = audio;
+                let btn = item.type === 'narration'
+                    ? document.querySelector('.narration-audio .btn-play')
+                    : document.querySelectorAll('.dialogue-line .btn-play')[item.index];
+                if (btn) btn.classList.add('playing');
+                audio.onended = () => { if (btn) btn.classList.remove('playing'); resolve(); };
+                audio.onerror = () => { if (btn) btn.classList.remove('playing'); resolve(); };
+                audio.play().catch(() => resolve());
+            });
+        }
+        isPlayingAll = false;
+        document.getElementById('btn-play-all').disabled = false;
+        currentAudio = null;
+    }
+
+    // ===== HISTORY =====
+    async function showHistory() {
+        if (!currentGameId) return;
+        const modal = document.getElementById('history-modal');
+        const content = document.getElementById('history-content');
+        content.innerHTML = '<div style="color:var(--gray-text);">Loading...</div>';
+        modal.classList.remove('hidden');
+        try {
+            const data = await api('GET', `/api/games/${currentGameId}/turns`);
+            const turns = data.turns || [];
+            content.innerHTML = turns.length ? turns.map(t => {
+                const ch = t.choices || [];
+                const ct = t.player_choice && ch[t.player_choice-1] ? `Chose: ${esc(ch[t.player_choice-1])}` : '';
+                return `<div class="history-turn">
+                    <div class="history-turn-header">Turn ${t.turn_number}</div>
+                    <div class="history-turn-text">${esc((t.narration_text||'').substring(0,300))}${(t.narration_text||'').length>300?'...':''}</div>
+                    ${ct ? `<div class="history-choice">${ct}</div>` : ''}
+                </div>`;
+            }).join('') : '<div style="color:var(--gray-text);">No turns yet.</div>';
+        } catch (e) { content.innerHTML = `<div style="color:var(--error);">Failed: ${e.message}</div>`; }
+    }
+    function hideHistory() { document.getElementById('history-modal').classList.add('hidden'); }
+
+    // ===== UTILS =====
+    function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    // ===== INIT =====
+    checkAuth();
+</script>
+</body>
+</html>
