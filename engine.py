@@ -13,9 +13,12 @@ ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 CLAUDE_URL = "https://api.anthropic.com/v1/messages"
 
-_executor = ThreadPoolExecutor(max_workers=6)
+_executor = ThreadPoolExecutor(max_workers=10)
 
 _PROMPTS_DIR = os.path.join(os.path.dirname(__file__), 'prompts')
+
+# Precomputed turn cache: (game_id, turn_number, choice) -> claude result dict
+_precomputed = {}
 
 
 def _load_prompt(filename: str) -> str:
@@ -206,7 +209,48 @@ def create_game(user_id: str, setting: str, tone: str, genre: str, character_des
                      opening["narration"], opening.get("dialogue", []),
                      characters, opening.get("image_prompt", ""))
 
+    # Precompute all 3 choices for turn 0 in background
+    opening_choices = opening.get("choices", [])
+    if opening_choices:
+        _executor.submit(_precompute_choices, game_id, 0,
+                         game, initial_state, characters, opening_choices)
+
     return {"game": game, "characters": characters, "turn": turn}
+
+
+def _build_turn_prompt(game: dict, game_state: dict, characters: list, choice_text: str) -> str:
+    """Build a turn prompt from game context and a choice."""
+    template = _load_prompt("turn.md")
+    characters_text = "\n".join(
+        f"- **{c['name']}**: {c.get('description', '')} | Personality: {c.get('personality', '')}"
+        for c in characters
+    )
+    return template.replace("{{world_summary}}", game.get("world_summary", "")) \
+                   .replace("{{game_state}}", json.dumps(game_state, indent=2)) \
+                   .replace("{{characters}}", characters_text) \
+                   .replace("{{player_choice}}", choice_text) \
+                   .replace("{{tone}}", game.get("tone", "")) \
+                   .replace("{{genre}}", game.get("genre", ""))
+
+
+def _precompute_choices(game_id: str, turn_number: int, game: dict,
+                        game_state: dict, characters: list, choices: list):
+    """Background: precompute Claude responses for all 3 choices."""
+    for i, choice_text in enumerate(choices):
+        choice_num = i + 1
+        cache_key = (game_id, turn_number, choice_num)
+        try:
+            prompt = _build_turn_prompt(game, game_state, characters, choice_text)
+            result = _call_claude(prompt)
+            _precomputed[cache_key] = result
+            print(f"✅ Precomputed choice {choice_num} for turn {turn_number} of game {game_id[:8]}")
+        except Exception as e:
+            print(f"⚠️ Precompute failed for choice {choice_num}: {e}")
+
+    # Clean old entries (keep only current turn's precomputes per game)
+    stale = [k for k in _precomputed if k[0] == game_id and k[1] != turn_number]
+    for k in stale:
+        del _precomputed[k]
 
 
 def process_turn(game_id: str, player_choice: int) -> dict:
@@ -224,26 +268,20 @@ def process_turn(game_id: str, player_choice: int) -> dict:
     client.table("gauntlet_turns").update({"player_choice": player_choice}).eq("id", latest_turn["id"]).execute()
 
     characters = _get_characters_for_game(game_id)
-
-    # Build prompt
-    template = _load_prompt("turn.md")
     game_state = latest_turn["game_state"]
     choices = latest_turn.get("choices", [])
-    choice_text = choices[player_choice - 1] if 0 < player_choice <= len(choices) else "Unknown"
 
-    characters_text = "\n".join(
-        f"- **{c['name']}**: {c.get('description', '')} | Personality: {c.get('personality', '')}"
-        for c in characters
-    )
-
-    prompt = template.replace("{{world_summary}}", game.get("world_summary", "")) \
-                      .replace("{{game_state}}", json.dumps(game_state, indent=2)) \
-                      .replace("{{characters}}", characters_text) \
-                      .replace("{{player_choice}}", choice_text) \
-                      .replace("{{tone}}", game.get("tone", "")) \
-                      .replace("{{genre}}", game.get("genre", ""))
-
-    result = _call_claude(prompt)
+    # Check precomputed cache first
+    cache_key = (game_id, latest_turn["turn_number"], player_choice)
+    if cache_key in _precomputed:
+        result = _precomputed.pop(cache_key)
+        print(f"⚡ Cache hit for choice {player_choice} on turn {latest_turn['turn_number']}")
+    else:
+        # Cache miss — generate on the fly
+        choice_text = choices[player_choice - 1] if 0 < player_choice <= len(choices) else "Unknown"
+        prompt = _build_turn_prompt(game, game_state, characters, choice_text)
+        result = _call_claude(prompt)
+        print(f"🐌 Cache miss for choice {player_choice} on turn {latest_turn['turn_number']}")
 
     new_state = result.get("updated_game_state", game_state)
     new_turn_number = latest_turn["turn_number"] + 1
@@ -270,6 +308,12 @@ def process_turn(game_id: str, player_choice: int) -> dict:
     _executor.submit(_generate_and_update_media, turn["id"], game_id,
                      result.get("narration", ""), result.get("dialogue", []),
                      characters, result.get("image_prompt", ""))
+
+    # Precompute all 3 choices for the NEW turn in background
+    new_choices = result.get("choices", [])
+    if new_choices:
+        _executor.submit(_precompute_choices, game_id, new_turn_number,
+                         game, new_state, characters, new_choices)
 
     return {"game": game, "characters": characters, "turn": turn}
 
