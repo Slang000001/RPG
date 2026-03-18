@@ -35,7 +35,7 @@ Respond with ONLY valid JSON matching this exact structure:
     }
   ],
   "opening_scene": {
-    "narration": "3-5 paragraphs of vivid, atmospheric narration setting the opening scene. Address the player as 'you'. Describe what they see, hear, and feel. End with a moment of tension or discovery that leads to the choices.",
+    "narration": "1-2 short paragraphs (under 100 words total). Set the scene with a vivid hook, then drop the player into a moment of tension. Address as 'you'. Let dialogue carry the rest.",
     "dialogue": [
       {
         "character_name": "Name of speaking character",
