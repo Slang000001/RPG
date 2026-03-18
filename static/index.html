@@ -544,7 +544,7 @@
             const desc = b.querySelector('.char-desc').value.trim();
             if (name) characters.push({ name, description: desc });
         });
-        showLoading('Forging your world... Claude is weaving the story, generating art, and voicing characters. This may take 30-60 seconds.');
+        showLoading('Forging your world... Claude is crafting your story...');
         try {
             const data = await api('POST', '/api/games', {
                 setting: document.getElementById('setting').value.trim(),
@@ -556,6 +556,8 @@
             currentGameData = data;
             renderGame(data);
             showPage('page-game');
+            // Poll for media in background
+            pollForMedia(data.turn.id);
         } catch (e) { alert('Failed to create game: ' + e.message); }
         finally { hideLoading(); btn.disabled = false; }
     }
@@ -577,12 +579,14 @@
     async function submitChoice(choice) {
         document.querySelectorAll('.btn-choice').forEach(b => b.disabled = true);
         document.querySelectorAll('.btn-choice')[choice - 1].classList.add('selected');
-        showLoading('The story unfolds... processing your choice, generating new scene art and voice acting.');
+        showLoading('The story unfolds...');
         try {
             const data = await api('POST', `/api/games/${currentGameId}/turns`, { choice });
             currentGameData = data;
             renderGame(data);
             document.getElementById('game-main').scrollTop = 0;
+            // Poll for media in background
+            pollForMedia(data.turn.id);
         } catch (e) {
             alert('Turn failed: ' + e.message);
             document.querySelectorAll('.btn-choice').forEach(b => b.disabled = false);
@@ -659,6 +663,30 @@
             : '<li style="font-style:italic;">Empty</li>';
 
         document.getElementById('sidebar-turn').textContent = state.turn_count ?? turn.turn_number ?? 0;
+    }
+
+    // ===== MEDIA POLLING =====
+    let _mediaPollTimer = null;
+    async function pollForMedia(turnId) {
+        if (_mediaPollTimer) clearInterval(_mediaPollTimer);
+        let attempts = 0;
+        _mediaPollTimer = setInterval(async () => {
+            attempts++;
+            if (attempts > 30) { clearInterval(_mediaPollTimer); return; } // give up after 60s
+            try {
+                const data = await api('GET', `/api/turns/${turnId}/media`);
+                if (data.has_media) {
+                    clearInterval(_mediaPollTimer);
+                    // Update current game data with media
+                    if (currentGameData && currentGameData.turn && currentGameData.turn.id === turnId) {
+                        currentGameData.turn.image_url = data.turn.image_url;
+                        currentGameData.turn.narration_audio_url = data.turn.narration_audio_url;
+                        currentGameData.turn.dialogue = data.turn.dialogue;
+                        renderGame(currentGameData);
+                    }
+                }
+            } catch (e) { /* silent retry */ }
+        }, 2000);
     }
 
     // ===== AUDIO =====

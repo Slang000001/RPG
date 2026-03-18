@@ -10,7 +10,7 @@ from image_gen import generate_image
 from voice_gen import generate_speech, get_voice_id
 
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
+CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 CLAUDE_URL = "https://api.anthropic.com/v1/messages"
 
 _executor = ThreadPoolExecutor(max_workers=6)
@@ -110,6 +110,33 @@ def _generate_turn_media(game_id: str, narration: str, dialogue: list, character
     }
 
 
+def _generate_and_update_media(turn_id: str, game_id: str, narration: str,
+                                dialogue: list, characters: list, image_prompt: str):
+    """Background task: generate media and update the turn row in DB."""
+    try:
+        media = _generate_turn_media(game_id, narration, dialogue, characters, image_prompt)
+        client = db.get_client()
+        client.table("gauntlet_turns").update({
+            "image_url": media["image_url"],
+            "narration_audio_url": media["narration_audio_url"],
+            "dialogue": media["dialogue"],
+        }).eq("id", turn_id).execute()
+        print(f"✅ Media updated for turn {turn_id}")
+    except Exception as e:
+        print(f"❌ Background media gen failed for turn {turn_id}: {e}")
+
+
+def get_turn_media(turn_id: str) -> dict:
+    """Check if media has been generated for a turn."""
+    client = db.get_client()
+    result = client.table("gauntlet_turns").select(
+        "id, image_url, narration_audio_url, dialogue"
+    ).eq("id", turn_id).single().execute()
+    turn = result.data
+    has_media = bool(turn.get("image_url") or turn.get("narration_audio_url"))
+    return {"has_media": has_media, "turn": turn}
+
+
 # ==================== Public API ====================
 
 def create_game(user_id: str, setting: str, tone: str, genre: str, character_descs: list[dict]) -> dict:
@@ -152,35 +179,34 @@ def create_game(user_id: str, setting: str, tone: str, genre: str, character_des
         }).execute()
         characters.append(char_result.data[0])
 
-    # Parallel media generation
-    opening = seed["opening_scene"]
-    media = _generate_turn_media(
-        game_id, opening["narration"],
-        opening.get("dialogue", []), characters,
-        opening.get("image_prompt", "")
-    )
-
     # Initial game state
+    opening = seed["opening_scene"]
     initial_state = seed.get("initial_game_state", {})
     initial_state["turn_count"] = 0
     initial_state["world_summary"] = seed.get("world_summary", "")
     initial_state["tone"] = tone
     initial_state["genre"] = genre
 
-    # Turn 0
+    # Save turn 0 immediately with text (no media yet)
+    dialogue_no_audio = [{"character_name": d.get("character_name", ""), "line": d.get("line", "")}
+                         for d in opening.get("dialogue", [])]
     turn_result = client.table("gauntlet_turns").insert({
         "game_id": game_id,
         "turn_number": 0,
         "game_state": initial_state,
         "narration_text": opening["narration"],
-        "narration_audio_url": media["narration_audio_url"],
-        "dialogue": media["dialogue"],
-        "image_url": media["image_url"],
+        "dialogue": dialogue_no_audio,
         "image_prompt": opening.get("image_prompt", ""),
         "choices": opening.get("choices", []),
     }).execute()
+    turn = turn_result.data[0]
 
-    return {"game": game, "characters": characters, "turn": turn_result.data[0]}
+    # Fire media generation in background
+    _executor.submit(_generate_and_update_media, turn["id"], game_id,
+                     opening["narration"], opening.get("dialogue", []),
+                     characters, opening.get("image_prompt", ""))
+
+    return {"game": game, "characters": characters, "turn": turn}
 
 
 def process_turn(game_id: str, player_choice: int) -> dict:
@@ -219,12 +245,6 @@ def process_turn(game_id: str, player_choice: int) -> dict:
 
     result = _call_claude(prompt)
 
-    media = _generate_turn_media(
-        game_id, result.get("narration", ""),
-        result.get("dialogue", []), characters,
-        result.get("image_prompt", "")
-    )
-
     new_state = result.get("updated_game_state", game_state)
     new_turn_number = latest_turn["turn_number"] + 1
     new_state["turn_count"] = new_turn_number
@@ -232,19 +252,26 @@ def process_turn(game_id: str, player_choice: int) -> dict:
     new_state["tone"] = game.get("tone", "")
     new_state["genre"] = game.get("genre", "")
 
+    # Save turn immediately with text (no media yet)
+    dialogue_no_audio = [{"character_name": d.get("character_name", ""), "line": d.get("line", "")}
+                         for d in result.get("dialogue", [])]
     turn_result = client.table("gauntlet_turns").insert({
         "game_id": game_id,
         "turn_number": new_turn_number,
         "game_state": new_state,
         "narration_text": result.get("narration", ""),
-        "narration_audio_url": media["narration_audio_url"],
-        "dialogue": media["dialogue"],
-        "image_url": media["image_url"],
+        "dialogue": dialogue_no_audio,
         "image_prompt": result.get("image_prompt", ""),
         "choices": result.get("choices", []),
     }).execute()
+    turn = turn_result.data[0]
 
-    return {"game": game, "characters": characters, "turn": turn_result.data[0]}
+    # Fire media generation in background
+    _executor.submit(_generate_and_update_media, turn["id"], game_id,
+                     result.get("narration", ""), result.get("dialogue", []),
+                     characters, result.get("image_prompt", ""))
+
+    return {"game": game, "characters": characters, "turn": turn}
 
 
 def load_game(game_id: str) -> dict:

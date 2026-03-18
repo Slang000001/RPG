@@ -4,7 +4,7 @@ from flask import Flask, request, jsonify, send_file
 import os
 
 from auth import get_authenticated_user, AuthError
-from engine import create_game, process_turn, load_game, list_games, get_turn_history
+from engine import create_game, process_turn, load_game, list_games, get_turn_history, get_turn_media
 from voice_gen import init_voice_map
 
 app = Flask(__name__, static_folder='static')
@@ -136,6 +136,17 @@ def api_get_turns(game_id):
 
     turns = get_turn_history(game_id)
     return jsonify({"success": True, "turns": turns})
+
+
+@app.route('/api/turns/<turn_id>/media', methods=['GET'])
+def api_turn_media(turn_id):
+    """Poll for media generation status on a turn."""
+    get_authenticated_user()  # auth check
+    try:
+        result = get_turn_media(turn_id)
+        return jsonify({"success": True, **result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ==================== Startup ====================
