@@ -11,8 +11,21 @@ ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech"
 # Voice type -> ElevenLabs voice ID mapping (populated at startup)
 _VOICE_MAP = {}
 
-# Fallback narrator voice (Rachel)
-DEFAULT_NARRATOR_VOICE = "21m00Tcm4TlvDq8ikWAM"
+# Hardcoded voice type -> voice ID mapping based on Scott's ElevenLabs library.
+# These are curated picks from 35 available voices.
+_STATIC_VOICE_MAP = {
+    "deep_male":    "pNInz6obpgDQGcFmaJgB",  # Adam - Dominant, Firm
+    "young_male":   "SOYHLrjzK2X1ezoPC6cr",  # Harry - Fierce Warrior
+    "old_male":     "pqHfZKP75CvOlQylNhV4",  # Bill - Wise, Mature, Balanced
+    "deep_female":  "EXAVITQu4vr4xnSDxMaL",  # Sarah - Mature, Reassuring
+    "young_female": "cgSgspJ2msm6clMCkdW9",  # Jessica - Playful, Bright, Warm
+    "old_female":   "XrExE9yKIg1WjnnlVkGX",  # Matilda - Knowledgable, Professional
+    "mysterious":   "N2lVS1w4EtoT3dr4eOWO",  # Callum - Husky Trickster
+    "villain":      "nPczCjzI2devNBz1zQrb",  # Brian - Deep, Resonant and Comforting (menacing when low)
+    "narrator":     "goT3UYdM9bhm0n2lmKQx",  # Edward - British, Dark, Seductive
+}
+
+DEFAULT_NARRATOR_VOICE = "goT3UYdM9bhm0n2lmKQx"  # Edward
 
 
 def _get_headers():
@@ -20,7 +33,7 @@ def _get_headers():
 
 
 def init_voice_map():
-    """Fetch voices from ElevenLabs account and build type -> voice_id mapping."""
+    """Initialize voice map from static config. Validates voices still exist in account."""
     global _VOICE_MAP
     if not ELEVENLABS_API_KEY:
         print("⚠️ ELEVENLABS_API_KEY not set — voice map empty")
@@ -34,35 +47,24 @@ def init_voice_map():
         )
         resp.raise_for_status()
         voices = resp.json().get("voices", [])
-        by_name = {v["name"].lower(): v["voice_id"] for v in voices}
+        valid_ids = {v["voice_id"] for v in voices}
+        id_to_name = {v["voice_id"]: v["name"] for v in voices}
 
-        type_preferences = {
-            "deep_male": ["adam", "daniel", "marcus", "clyde", "arnold"],
-            "young_male": ["josh", "sam", "patrick", "harry", "liam"],
-            "old_male": ["bill", "george", "thomas", "arthur", "james"],
-            "deep_female": ["nicole", "domi", "rachel", "charlotte", "sarah"],
-            "young_female": ["bella", "elli", "emily", "lily", "jessica"],
-            "old_female": ["dorothy", "grace", "margaret", "glinda", "matilda"],
-            "mysterious": ["freya", "gigi", "aria", "callum", "fin"],
-            "villain": ["clyde", "arnold", "adam", "onyx", "drew"],
-            "narrator": ["rachel", "adam", "daniel", "aria", "alloy"],
-        }
-
-        for voice_type, preferences in type_preferences.items():
-            for name in preferences:
-                if name in by_name:
-                    _VOICE_MAP[voice_type] = by_name[name]
-                    break
-            if voice_type not in _VOICE_MAP and voices:
+        # Use static map, validating each voice still exists
+        for voice_type, voice_id in _STATIC_VOICE_MAP.items():
+            if voice_id in valid_ids:
+                _VOICE_MAP[voice_type] = voice_id
+            elif voices:
                 _VOICE_MAP[voice_type] = voices[0]["voice_id"]
 
         print(f"✅ Voice map: {len(_VOICE_MAP)} types from {len(voices)} voices")
         for vtype, vid in _VOICE_MAP.items():
-            name = next((v["name"] for v in voices if v["voice_id"] == vid), "?")
-            print(f"   {vtype} -> {name} ({vid})")
+            print(f"   {vtype} -> {id_to_name.get(vid, '?')} ({vid})")
 
     except Exception as e:
         print(f"❌ Voice map init failed: {e}")
+        # Fall back to static map without validation
+        _VOICE_MAP.update(_STATIC_VOICE_MAP)
 
 
 def get_voice_id(voice_type: str, character_voice_id: str = None) -> str:

@@ -7,7 +7,7 @@ import uuid
 import db
 
 GOOGLE_AI_API_KEY = os.environ.get('GOOGLE_AI_API_KEY')
-IMAGEN_URL = "https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict"
+IMAGEN_URL = "https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict"
 
 
 def generate_image(prompt: str, game_id: str) -> str | None:
@@ -18,7 +18,8 @@ def generate_image(prompt: str, game_id: str) -> str | None:
 
     try:
         resp = requests.post(
-            f"{IMAGEN_URL}?key={GOOGLE_AI_API_KEY}",
+            IMAGEN_URL,
+            headers={"x-goog-api-key": GOOGLE_AI_API_KEY},
             json={
                 "instances": [{"prompt": prompt}],
                 "parameters": {
