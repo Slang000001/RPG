@@ -13,7 +13,7 @@ ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 CLAUDE_URL = "https://api.anthropic.com/v1/messages"
 
-_executor = ThreadPoolExecutor(max_workers=10)
+_executor = ThreadPoolExecutor(max_workers=6)
 
 _PROMPTS_DIR = os.path.join(os.path.dirname(__file__), 'prompts')
 
@@ -68,47 +68,67 @@ def _get_characters_for_game(game_id: str) -> list[dict]:
     return result.data or []
 
 
+_FEMALE_SIGNALS = ['she', 'her', 'woman', 'female', 'girl', 'lady', 'mother', 'sister',
+                    'queen', 'princess', 'priestess', 'witch', 'sorceress', 'empress',
+                    'señora', 'señorita', 'miss', 'mrs', 'ms']
+_MALE_SIGNALS = ['he', 'his', 'man', 'male', 'boy', 'king', 'prince', 'priest',
+                 'warrior', 'brother', 'father', 'señor', 'mr']
+_FEMALE_VOICE_TYPES = {'deep_female', 'young_female', 'old_female'}
+_MALE_VOICE_TYPES = {'deep_male', 'young_male', 'old_male'}
+
+
+def _fix_voice_gender(voice_type: str, description: str, personality: str) -> str:
+    """Override voice type if it mismatches obvious gender signals in the character text."""
+    text = f"{description} {personality}".lower()
+    is_female = any(w in text for w in _FEMALE_SIGNALS)
+    is_male = any(w in text for w in _MALE_SIGNALS)
+
+    if is_female and not is_male and voice_type in _MALE_VOICE_TYPES:
+        return "young_female" if "young" in voice_type else "deep_female"
+    if is_male and not is_female and voice_type in _FEMALE_VOICE_TYPES:
+        return "young_male" if "young" in voice_type else "deep_male"
+    return voice_type
+
+
 def _generate_turn_media(game_id: str, narration: str, dialogue: list, characters: list, image_prompt: str) -> dict:
-    """Fire image + all audio generation in parallel. Returns media URLs."""
+    """Generate image in parallel with sequential TTS to avoid socket exhaustion."""
     char_lookup = {c["name"]: c for c in characters}
-    futures = {}
 
+    # Image generation runs in parallel with audio
+    image_future = None
     if image_prompt:
-        futures["image"] = _executor.submit(generate_image, image_prompt, game_id)
+        image_future = _executor.submit(generate_image, image_prompt, game_id)
 
+    # TTS runs sequentially to avoid resource exhaustion
+    narration_audio_url = None
     if narration:
         narrator_voice = get_voice_id("narrator")
-        futures["narration"] = _executor.submit(
-            generate_speech, narration, narrator_voice, game_id, "narration"
-        )
-
-    for i, line in enumerate(dialogue):
-        char_name = line.get("character_name", "")
-        char = char_lookup.get(char_name, {})
-        voice_id = get_voice_id(
-            char.get("voice_type", "narrator"),
-            char.get("voice_id")
-        )
-        futures[f"dialogue_{i}"] = _executor.submit(
-            generate_speech, line["line"], voice_id, game_id, f"char_{char_name}"
-        )
-
-    results = {}
-    for key, future in futures.items():
-        try:
-            results[key] = future.result(timeout=45)
-        except Exception as e:
-            print(f"⚠️ Media gen failed ({key}): {e}")
-            results[key] = None
+        narration_audio_url = generate_speech(narration, narrator_voice, game_id, "narration")
 
     updated_dialogue = []
-    for i, line in enumerate(dialogue):
-        entry = {**line, "audio_url": results.get(f"dialogue_{i}")}
-        updated_dialogue.append(entry)
+    for line in dialogue:
+        char_name = line.get("character_name", "")
+        char = char_lookup.get(char_name, {})
+        voice_type = _fix_voice_gender(
+            char.get("voice_type", "narrator"),
+            char.get("description", ""),
+            char.get("personality", "")
+        )
+        voice_id = get_voice_id(voice_type, char.get("voice_id"))
+        audio_url = generate_speech(line["line"], voice_id, game_id, f"char_{char_name}")
+        updated_dialogue.append({**line, "audio_url": audio_url})
+
+    # Collect image result
+    image_url = None
+    if image_future:
+        try:
+            image_url = image_future.result(timeout=45)
+        except Exception as e:
+            print(f"⚠️ Image gen failed: {e}")
 
     return {
-        "image_url": results.get("image"),
-        "narration_audio_url": results.get("narration"),
+        "image_url": image_url,
+        "narration_audio_url": narration_audio_url,
         "dialogue": updated_dialogue
     }
 
