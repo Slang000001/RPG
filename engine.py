@@ -136,8 +136,13 @@ def get_turn_media(turn_id: str) -> dict:
         "id, image_url, narration_audio_url, dialogue"
     ).eq("id", turn_id).single().execute()
     turn = result.data
-    has_media = bool(turn.get("image_url") or turn.get("narration_audio_url"))
-    return {"has_media": has_media, "turn": turn}
+    # Check that ALL media is ready: image + narration audio + all dialogue audio
+    has_image = bool(turn.get("image_url"))
+    has_narration_audio = bool(turn.get("narration_audio_url"))
+    dialogue = turn.get("dialogue") or []
+    has_all_dialogue_audio = all(d.get("audio_url") for d in dialogue) if dialogue else True
+    all_media_ready = has_image and has_narration_audio and has_all_dialogue_audio
+    return {"has_media": all_media_ready, "turn": turn}
 
 
 # ==================== Public API ====================
