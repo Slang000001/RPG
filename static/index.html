@@ -352,7 +352,12 @@
                 </select>
             </div>
             <div class="form-group">
-                <label>Characters (1-3)</label>
+                <label>Your Character</label>
+                <input type="text" id="player-name" placeholder="Your name in this world" required>
+                <input type="text" id="player-appearance" placeholder="Your appearance (e.g., tall man, dark skin, shaved head, leather armor, scar across left eye)" required style="margin-top: 0.5rem;">
+            </div>
+            <div class="form-group">
+                <label>NPCs (1-3)</label>
                 <div id="characters-container">
                     <div class="char-block" data-index="0">
                         <h3>Character 1</h3>
@@ -550,6 +555,8 @@
                 setting: document.getElementById('setting').value.trim(),
                 tone: document.getElementById('tone').value,
                 genre: document.getElementById('genre').value,
+                player_name: document.getElementById('player-name').value.trim(),
+                player_appearance: document.getElementById('player-appearance').value.trim(),
                 characters
             });
             currentGameId = data.game.id;

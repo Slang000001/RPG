@@ -13,7 +13,7 @@ ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 CLAUDE_URL = "https://api.anthropic.com/v1/messages"
 
-_executor = ThreadPoolExecutor(max_workers=6)
+_executor = ThreadPoolExecutor(max_workers=12)
 
 _PROMPTS_DIR = os.path.join(os.path.dirname(__file__), 'prompts')
 
@@ -69,9 +69,23 @@ def _get_characters_for_game(game_id: str) -> list[dict]:
     return result.data or []
 
 
+def _find_character(char_name: str, characters: list) -> dict:
+    """Find a character by name with fuzzy matching — exact first, then substring."""
+    # Exact match
+    for c in characters:
+        if c["name"] == char_name:
+            return c
+    # Substring match (handles "Espe" matching "Esperanza Vega")
+    name_lower = char_name.lower()
+    for c in characters:
+        if name_lower in c["name"].lower() or c["name"].lower() in name_lower:
+            return c
+    print(f"⚠️ No character match for '{char_name}', using narrator voice")
+    return {}
+
+
 def _generate_turn_media(game_id: str, narration: str, dialogue: list, characters: list, image_prompt: str) -> dict:
     """Generate image in parallel with sequential TTS to avoid socket exhaustion."""
-    char_lookup = {c["name"]: c for c in characters}
 
     # Image generation runs in parallel with audio
     image_future = None
@@ -86,8 +100,8 @@ def _generate_turn_media(game_id: str, narration: str, dialogue: list, character
     updated_dialogue = []
     for line in dialogue:
         char_name = line.get("character_name", "")
-        char = char_lookup.get(char_name, {})
-        # Use pre-resolved voice_id from DB, fall back to voice_type name lookup
+        char = _find_character(char_name, characters)
+        # Use pre-resolved voice_id from DB — guaranteed consistent per character
         voice_id = char.get("voice_id") or resolve_voice_id(char.get("voice_type", ""))
         audio_url = generate_speech(line["line"], voice_id, game_id, f"char_{char_name}")
         updated_dialogue.append({**line, "audio_url": audio_url})
@@ -141,16 +155,18 @@ def get_turn_media(turn_id: str) -> dict:
 
 # ==================== Public API ====================
 
-def create_game(user_id: str, setting: str, tone: str, genre: str, character_descs: list[dict]) -> dict:
+def create_game(user_id: str, setting: str, tone: str, genre: str, player: dict, character_descs: list[dict]) -> dict:
     """Create a new game: world seed via Claude, parallel media, persist to DB."""
     template = _load_prompt("world_seed.md")
     characters_text = "\n".join(
         f"- **{c['name']}**: {c.get('description', 'No description')}"
         for c in character_descs
     )
+    player_text = f"**{player['name']}**: {player['appearance']}"
     prompt = template.replace("{{setting}}", setting) \
                       .replace("{{tone}}", tone) \
                       .replace("{{genre}}", genre) \
+                      .replace("{{player_character}}", player_text) \
                       .replace("{{characters}}", characters_text) \
                       .replace("{{voice_list}}", get_voice_list_for_prompt())
 
@@ -191,6 +207,8 @@ def create_game(user_id: str, setting: str, tone: str, genre: str, character_des
     initial_state["world_summary"] = seed.get("world_summary", "")
     initial_state["tone"] = tone
     initial_state["genre"] = genre
+    initial_state["player_name"] = player["name"]
+    initial_state["player_appearance"] = player["appearance"]
 
     # Save turn 0 immediately with text (no media yet)
     dialogue_no_audio = [{"character_name": d.get("character_name", ""), "line": d.get("line", "")}
@@ -223,10 +241,15 @@ def create_game(user_id: str, setting: str, tone: str, genre: str, character_des
 def _build_turn_prompt(game: dict, game_state: dict, characters: list, choice_text: str) -> str:
     """Build a turn prompt from game context and a choice."""
     template = _load_prompt("turn.md")
-    characters_text = "\n".join(
+    # Player character appearance (locked from game creation)
+    player_name = game_state.get("player_name", "the player")
+    player_appearance = game_state.get("player_appearance", "")
+    player_line = f"- **{player_name} (the player, 'you')**: Appearance: {player_appearance}" if player_appearance else ""
+    npc_lines = "\n".join(
         f"- **{c['name']}**: Appearance: {c.get('description', '')} | Personality: {c.get('personality', '')}"
         for c in characters
     )
+    characters_text = f"{player_line}\n{npc_lines}" if player_line else npc_lines
     return template.replace("{{world_summary}}", game.get("world_summary", "")) \
                    .replace("{{game_state}}", json.dumps(game_state, indent=2)) \
                    .replace("{{characters}}", characters_text) \
@@ -235,19 +258,44 @@ def _build_turn_prompt(game: dict, game_state: dict, characters: list, choice_te
                    .replace("{{genre}}", game.get("genre", ""))
 
 
+def _precompute_single_choice(game_id: str, turn_number: int, choice_num: int,
+                               game: dict, game_state: dict, characters: list, choice_text: str):
+    """Precompute a single choice: Claude call + full media generation."""
+    cache_key = (game_id, turn_number, choice_num)
+    try:
+        prompt = _build_turn_prompt(game, game_state, characters, choice_text)
+        result = _call_claude(prompt)
+
+        # Generate full media for this branch
+        media = _generate_turn_media(
+            game_id, result.get("narration", ""),
+            result.get("dialogue", []), characters,
+            result.get("image_prompt", "")
+        )
+
+        _precomputed[cache_key] = {"result": result, "media": media}
+        print(f"✅ Precomputed choice {choice_num} (text+media) for turn {turn_number} of game {game_id[:8]}")
+    except Exception as e:
+        print(f"⚠️ Precompute failed for choice {choice_num}: {e}")
+
+
 def _precompute_choices(game_id: str, turn_number: int, game: dict,
                         game_state: dict, characters: list, choices: list):
-    """Background: precompute Claude responses for all 3 choices."""
+    """Background: precompute Claude responses + full media for all 3 choices in parallel."""
+    futures = []
     for i, choice_text in enumerate(choices):
-        choice_num = i + 1
-        cache_key = (game_id, turn_number, choice_num)
+        future = _executor.submit(
+            _precompute_single_choice, game_id, turn_number, i + 1,
+            game, game_state, characters, choice_text
+        )
+        futures.append(future)
+
+    # Wait for all to finish
+    for f in futures:
         try:
-            prompt = _build_turn_prompt(game, game_state, characters, choice_text)
-            result = _call_claude(prompt)
-            _precomputed[cache_key] = result
-            print(f"✅ Precomputed choice {choice_num} for turn {turn_number} of game {game_id[:8]}")
-        except Exception as e:
-            print(f"⚠️ Precompute failed for choice {choice_num}: {e}")
+            f.result(timeout=120)
+        except Exception:
+            pass
 
     # Clean old entries (keep only current turn's precomputes per game)
     stale = [k for k in _precomputed if k[0] == game_id and k[1] != turn_number]
@@ -275,14 +323,18 @@ def process_turn(game_id: str, player_choice: int) -> dict:
 
     # Check precomputed cache first
     cache_key = (game_id, latest_turn["turn_number"], player_choice)
-    if cache_key in _precomputed:
-        result = _precomputed.pop(cache_key)
-        print(f"⚡ Cache hit for choice {player_choice} on turn {latest_turn['turn_number']}")
+    cached = _precomputed.pop(cache_key, None)
+
+    if cached:
+        result = cached["result"]
+        media = cached["media"]
+        print(f"⚡ Cache hit (text+media) for choice {player_choice} on turn {latest_turn['turn_number']}")
     else:
         # Cache miss — generate on the fly
         choice_text = choices[player_choice - 1] if 0 < player_choice <= len(choices) else "Unknown"
         prompt = _build_turn_prompt(game, game_state, characters, choice_text)
         result = _call_claude(prompt)
+        media = None
         print(f"🐌 Cache miss for choice {player_choice} on turn {latest_turn['turn_number']}")
 
     new_state = result.get("updated_game_state", game_state)
@@ -292,24 +344,37 @@ def process_turn(game_id: str, player_choice: int) -> dict:
     new_state["tone"] = game.get("tone", "")
     new_state["genre"] = game.get("genre", "")
 
-    # Save turn immediately with text (no media yet)
-    dialogue_no_audio = [{"character_name": d.get("character_name", ""), "line": d.get("line", "")}
-                         for d in result.get("dialogue", [])]
-    turn_result = client.table("gauntlet_turns").insert({
-        "game_id": game_id,
-        "turn_number": new_turn_number,
-        "game_state": new_state,
-        "narration_text": result.get("narration", ""),
-        "dialogue": dialogue_no_audio,
-        "image_prompt": result.get("image_prompt", ""),
-        "choices": result.get("choices", []),
-    }).execute()
-    turn = turn_result.data[0]
+    if media:
+        # Full precompute — save turn WITH media
+        turn_result = client.table("gauntlet_turns").insert({
+            "game_id": game_id,
+            "turn_number": new_turn_number,
+            "game_state": new_state,
+            "narration_text": result.get("narration", ""),
+            "narration_audio_url": media["narration_audio_url"],
+            "dialogue": media["dialogue"],
+            "image_url": media["image_url"],
+            "image_prompt": result.get("image_prompt", ""),
+            "choices": result.get("choices", []),
+        }).execute()
+    else:
+        # Cache miss — save text only, generate media in background
+        dialogue_no_audio = [{"character_name": d.get("character_name", ""), "line": d.get("line", "")}
+                             for d in result.get("dialogue", [])]
+        turn_result = client.table("gauntlet_turns").insert({
+            "game_id": game_id,
+            "turn_number": new_turn_number,
+            "game_state": new_state,
+            "narration_text": result.get("narration", ""),
+            "dialogue": dialogue_no_audio,
+            "image_prompt": result.get("image_prompt", ""),
+            "choices": result.get("choices", []),
+        }).execute()
+        _executor.submit(_generate_and_update_media, turn_result.data[0]["id"], game_id,
+                         result.get("narration", ""), result.get("dialogue", []),
+                         characters, result.get("image_prompt", ""))
 
-    # Fire media generation in background
-    _executor.submit(_generate_and_update_media, turn["id"], game_id,
-                     result.get("narration", ""), result.get("dialogue", []),
-                     characters, result.get("image_prompt", ""))
+    turn = turn_result.data[0]
 
     # Precompute all 3 choices for the NEW turn in background
     new_choices = result.get("choices", [])

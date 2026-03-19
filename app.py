@@ -54,17 +54,22 @@ def api_create_game():
     setting = data.get("setting", "").strip()
     tone = data.get("tone", "").strip()
     genre = data.get("genre", "").strip()
+    player_name = data.get("player_name", "").strip()
+    player_appearance = data.get("player_appearance", "").strip()
     characters = data.get("characters", [])
 
     if not setting or not tone or not genre:
         return jsonify({"error": "setting, tone, and genre are required"}), 400
+    if not player_name or not player_appearance:
+        return jsonify({"error": "Player name and appearance are required"}), 400
     if not characters or len(characters) < 1:
-        return jsonify({"error": "At least one character is required"}), 400
+        return jsonify({"error": "At least one NPC is required"}), 400
     if len(characters) > 3:
-        return jsonify({"error": "Maximum 3 characters"}), 400
+        return jsonify({"error": "Maximum 3 NPCs"}), 400
 
+    player = {"name": player_name, "appearance": player_appearance}
     try:
-        result = create_game(user_id, setting, tone, genre, characters)
+        result = create_game(user_id, setting, tone, genre, player, characters)
         return jsonify({"success": True, **result}), 201
     except Exception as e:
         print(f"❌ Game creation failed: {e}")

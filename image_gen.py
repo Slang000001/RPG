@@ -10,18 +10,24 @@ GOOGLE_AI_API_KEY = os.environ.get('GOOGLE_AI_API_KEY')
 IMAGEN_URL = "https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict"
 
 
+IMAGE_STYLE_PREFIX = "Photorealistic, dramatic cinematic lighting, high detail. "
+
+
 def generate_image(prompt: str, game_id: str) -> str | None:
     """Generate image via Gemini Imagen, upload to Supabase Storage. Returns public URL."""
     if not GOOGLE_AI_API_KEY:
         print("⚠️ GOOGLE_AI_API_KEY not set — skipping image generation")
         return None
 
+    # Prepend photorealistic style
+    styled_prompt = IMAGE_STYLE_PREFIX + prompt
+
     try:
         resp = requests.post(
             IMAGEN_URL,
             headers={"x-goog-api-key": GOOGLE_AI_API_KEY},
             json={
-                "instances": [{"prompt": prompt}],
+                "instances": [{"prompt": styled_prompt}],
                 "parameters": {
                     "sampleCount": 1,
                     "aspectRatio": "16:9",

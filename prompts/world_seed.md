@@ -4,7 +4,8 @@ You are a master storyteller and game designer creating an immersive RPG world. 
 - **Setting**: {{setting}}
 - **Tone**: {{tone}}
 - **Genre**: {{genre}}
-- **Characters**: {{characters}}
+- **Player Character (the protagonist — "you")**: {{player_character}}
+- **NPCs**: {{characters}}
 
 ## Your Task
 Create a complete world seed with an opening scene. The world should feel alive, with history, conflict, and mystery. Characters should have distinct personalities and motivations.
@@ -12,7 +13,7 @@ Create a complete world seed with an opening scene. The world should feel alive,
 For each character, pick a `voice_name` from this list that best fits their personality:
 {{voice_list}}
 
-Also give each character a detailed `appearance` — specific physical traits (hair color, build, clothing, scars, accessories) that will be used in EVERY image prompt to keep characters visually consistent across scenes.
+Also give each character a detailed `appearance` — this is LOCKED for the entire game and will be copy-pasted into every image prompt verbatim. Be extremely specific: race/ethnicity, skin tone, hair color AND style, eye color, build, height, exact clothing, distinguishing features (scars, tattoos, accessories). The more specific, the more consistent the character will look across all scenes.
 
 ## Response Format
 Respond with ONLY valid JSON matching this exact structure:
@@ -64,7 +65,8 @@ Respond with ONLY valid JSON matching this exact structure:
 ```
 
 Important rules:
-- Each voice_name must be unique — don't assign the same voice to two characters
+- The Player Character's appearance is LOCKED — use it verbatim in every image_prompt where the player is visible. The player does NOT get a voice_name (narration uses "you").
+- Each NPC voice_name must be unique — don't assign the same voice to two NPCs
 - The opening narration should be immersive and draw the player in immediately
 - Each choice should lead to meaningfully different outcomes
 - Characters should speak in distinctive voices that match their personality
