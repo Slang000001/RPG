@@ -76,31 +76,47 @@ def resolve_voice_id(voice_name: str) -> str:
 
 
 def generate_speech(text: str, voice_id: str, game_id: str, label: str = "audio") -> str | None:
-    """Generate TTS audio, upload to Supabase Storage. Returns public URL."""
+    """Generate TTS audio, upload to Supabase Storage. Retries on rate limit."""
     if not ELEVENLABS_API_KEY:
         return None
 
-    try:
-        resp = requests.post(
-            f"{ELEVENLABS_TTS_URL}/{voice_id}",
-            headers=_get_headers(),
-            json={
-                "text": text,
-                "model_id": "eleven_turbo_v2_5",
-                "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
-            },
-            timeout=30
-        )
-        resp.raise_for_status()
+    for attempt in range(3):
+        try:
+            resp = requests.post(
+                f"{ELEVENLABS_TTS_URL}/{voice_id}",
+                headers=_get_headers(),
+                json={
+                    "text": text,
+                    "model_id": "eleven_turbo_v2_5",
+                    "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
+                },
+                timeout=30
+            )
 
-        filename = f"{game_id}/{label}_{uuid.uuid4().hex[:8]}.mp3"
-        client = db.get_client()
-        client.storage.from_("gauntlet-media").upload(
-            filename, resp.content,
-            file_options={"content-type": "audio/mpeg"}
-        )
-        return client.storage.from_("gauntlet-media").get_public_url(filename)
+            if resp.status_code == 429:
+                wait = (attempt + 1) * 3  # 3s, 6s, 9s
+                print(f"⚠️ TTS rate limited ({label}), retrying in {wait}s (attempt {attempt + 1}/3)")
+                import time
+                time.sleep(wait)
+                continue
 
-    except Exception as e:
-        print(f"❌ TTS failed ({label}): {e}")
-        return None
+            resp.raise_for_status()
+
+            filename = f"{game_id}/{label}_{uuid.uuid4().hex[:8]}.mp3"
+            client = db.get_client()
+            client.storage.from_("gauntlet-media").upload(
+                filename, resp.content,
+                file_options={"content-type": "audio/mpeg"}
+            )
+            return client.storage.from_("gauntlet-media").get_public_url(filename)
+
+        except Exception as e:
+            if attempt < 2 and "Resource temporarily unavailable" in str(e):
+                import time
+                time.sleep((attempt + 1) * 3)
+                continue
+            print(f"❌ TTS failed ({label}): {e}")
+            return None
+
+    print(f"❌ TTS failed ({label}): rate limited after 3 retries")
+    return None
