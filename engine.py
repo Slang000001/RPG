@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import db
 from image_gen import generate_image
-from voice_gen import generate_speech, get_voice_id
+from voice_gen import generate_speech, resolve_voice_id, get_voice_list_for_prompt, NARRATOR_VOICE
 
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
@@ -68,28 +68,6 @@ def _get_characters_for_game(game_id: str) -> list[dict]:
     return result.data or []
 
 
-_FEMALE_SIGNALS = ['she', 'her', 'woman', 'female', 'girl', 'lady', 'mother', 'sister',
-                    'queen', 'princess', 'priestess', 'witch', 'sorceress', 'empress',
-                    'señora', 'señorita', 'miss', 'mrs', 'ms']
-_MALE_SIGNALS = ['he', 'his', 'man', 'male', 'boy', 'king', 'prince', 'priest',
-                 'warrior', 'brother', 'father', 'señor', 'mr']
-_FEMALE_VOICE_TYPES = {'deep_female', 'young_female', 'old_female'}
-_MALE_VOICE_TYPES = {'deep_male', 'young_male', 'old_male'}
-
-
-def _fix_voice_gender(voice_type: str, description: str, personality: str) -> str:
-    """Override voice type if it mismatches obvious gender signals in the character text."""
-    text = f"{description} {personality}".lower()
-    is_female = any(w in text for w in _FEMALE_SIGNALS)
-    is_male = any(w in text for w in _MALE_SIGNALS)
-
-    if is_female and not is_male and voice_type in _MALE_VOICE_TYPES:
-        return "young_female" if "young" in voice_type else "deep_female"
-    if is_male and not is_female and voice_type in _FEMALE_VOICE_TYPES:
-        return "young_male" if "young" in voice_type else "deep_male"
-    return voice_type
-
-
 def _generate_turn_media(game_id: str, narration: str, dialogue: list, characters: list, image_prompt: str) -> dict:
     """Generate image in parallel with sequential TTS to avoid socket exhaustion."""
     char_lookup = {c["name"]: c for c in characters}
@@ -102,19 +80,14 @@ def _generate_turn_media(game_id: str, narration: str, dialogue: list, character
     # TTS runs sequentially to avoid resource exhaustion
     narration_audio_url = None
     if narration:
-        narrator_voice = get_voice_id("narrator")
-        narration_audio_url = generate_speech(narration, narrator_voice, game_id, "narration")
+        narration_audio_url = generate_speech(narration, NARRATOR_VOICE, game_id, "narration")
 
     updated_dialogue = []
     for line in dialogue:
         char_name = line.get("character_name", "")
         char = char_lookup.get(char_name, {})
-        voice_type = _fix_voice_gender(
-            char.get("voice_type", "narrator"),
-            char.get("description", ""),
-            char.get("personality", "")
-        )
-        voice_id = get_voice_id(voice_type, char.get("voice_id"))
+        # Use pre-resolved voice_id from DB, fall back to voice_type name lookup
+        voice_id = char.get("voice_id") or resolve_voice_id(char.get("voice_type", ""))
         audio_url = generate_speech(line["line"], voice_id, game_id, f"char_{char_name}")
         updated_dialogue.append({**line, "audio_url": audio_url})
 
@@ -177,7 +150,8 @@ def create_game(user_id: str, setting: str, tone: str, genre: str, character_des
     prompt = template.replace("{{setting}}", setting) \
                       .replace("{{tone}}", tone) \
                       .replace("{{genre}}", genre) \
-                      .replace("{{characters}}", characters_text)
+                      .replace("{{characters}}", characters_text) \
+                      .replace("{{voice_list}}", get_voice_list_for_prompt())
 
     seed = _call_claude(prompt)
     client = db.get_client()
@@ -198,12 +172,14 @@ def create_game(user_id: str, setting: str, tone: str, genre: str, character_des
     # Create characters
     characters = []
     for char_data in seed.get("characters", []):
+        voice_name = char_data.get("voice_name", "")
         char_result = client.table("gauntlet_characters").insert({
             "game_id": game_id,
             "name": char_data["name"],
-            "description": char_data.get("description", ""),
+            "description": char_data.get("appearance", char_data.get("description", "")),
             "personality": char_data.get("personality", ""),
-            "voice_type": char_data.get("voice_type", "narrator"),
+            "voice_type": voice_name,  # stores voice_name for lookup
+            "voice_id": resolve_voice_id(voice_name),  # resolved ElevenLabs ID
         }).execute()
         characters.append(char_result.data[0])
 
@@ -247,7 +223,7 @@ def _build_turn_prompt(game: dict, game_state: dict, characters: list, choice_te
     """Build a turn prompt from game context and a choice."""
     template = _load_prompt("turn.md")
     characters_text = "\n".join(
-        f"- **{c['name']}**: {c.get('description', '')} | Personality: {c.get('personality', '')}"
+        f"- **{c['name']}**: Appearance: {c.get('description', '')} | Personality: {c.get('personality', '')}"
         for c in characters
     )
     return template.replace("{{world_summary}}", game.get("world_summary", "")) \

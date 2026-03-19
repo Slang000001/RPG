@@ -1,4 +1,6 @@
-"""ElevenLabs TTS wrapper — REST API, no SDK."""
+"""ElevenLabs TTS wrapper — REST API, no SDK.
+Uses only Scott's custom 'My Voices' library. Edward is always narrator.
+Claude picks voices for characters at runtime from the available list."""
 
 import os
 import uuid
@@ -8,24 +10,23 @@ import db
 ELEVENLABS_API_KEY = os.environ.get('ELEVENLABS_API_KEY')
 ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech"
 
-# Voice type -> ElevenLabs voice ID mapping (populated at startup)
-_VOICE_MAP = {}
-
-# Hardcoded voice type -> voice ID mapping based on Scott's ElevenLabs library.
-# These are curated picks from 35 available voices.
-_STATIC_VOICE_MAP = {
-    "deep_male":    "pNInz6obpgDQGcFmaJgB",  # Adam - Dominant, Firm
-    "young_male":   "SOYHLrjzK2X1ezoPC6cr",  # Harry - Fierce Warrior
-    "old_male":     "pqHfZKP75CvOlQylNhV4",  # Bill - Wise, Mature, Balanced
-    "deep_female":  "EXAVITQu4vr4xnSDxMaL",  # Sarah - Mature, Reassuring
-    "young_female": "cgSgspJ2msm6clMCkdW9",  # Jessica - Playful, Bright, Warm
-    "old_female":   "XrExE9yKIg1WjnnlVkGX",  # Matilda - Knowledgable, Professional
-    "mysterious":   "N2lVS1w4EtoT3dr4eOWO",  # Callum - Husky Trickster
-    "villain":      "nPczCjzI2devNBz1zQrb",  # Brian - Deep, Resonant and Comforting (menacing when low)
-    "narrator":     "goT3UYdM9bhm0n2lmKQx",  # Edward - British, Dark, Seductive
+# Scott's custom voices only — Claude picks from these by name at world seed time
+MY_VOICES = {
+    "edward":      "goT3UYdM9bhm0n2lmKQx",  # British, Dark, Seductive, Low (NARRATOR)
+    "jerry_b":     "QzTKubutNn9TjrB7Xb2Q",  # Brash, Mischievous and Strong
+    "blondie":     "ShB6BQqbEXZxWO5511Qq",  # Seductive and Soft-Spoken
+    "ivanna":      "tQ4MEZFJOzsahSEEZtHK",  # Seductive & Intimate
+    "the_elf":     "e79twtVS2278lVZZQiAD",  # Small expert on big matters
+    "brad":        "f5HLTX707KIM4SzJYzSz",  # Welcoming & Casual
+    "preston":     "xfMeiSCf21GHlOp9LjKk",  # Pro Bedtime Voice
+    "hannah":      "M7ya1YbaeFaPXljg9BpK",  # Hannah Jayne
+    "emily":       "p43fx6U8afP2xoq1Ai9f",  # Australian Female
 }
 
-DEFAULT_NARRATOR_VOICE = "goT3UYdM9bhm0n2lmKQx"  # Edward
+# Voice name -> ID lookup for Claude's picks
+_voice_name_to_id = {}
+
+NARRATOR_VOICE = "goT3UYdM9bhm0n2lmKQx"  # Edward, always
 
 
 def _get_headers():
@@ -33,45 +34,45 @@ def _get_headers():
 
 
 def init_voice_map():
-    """Initialize voice map from static config. Validates voices still exist in account."""
-    global _VOICE_MAP
-    if not ELEVENLABS_API_KEY:
-        print("⚠️ ELEVENLABS_API_KEY not set — voice map empty")
-        return
-
-    try:
-        resp = requests.get(
-            "https://api.elevenlabs.io/v1/voices",
-            headers={"xi-api-key": ELEVENLABS_API_KEY},
-            timeout=10
-        )
-        resp.raise_for_status()
-        voices = resp.json().get("voices", [])
-        valid_ids = {v["voice_id"] for v in voices}
-        id_to_name = {v["voice_id"]: v["name"] for v in voices}
-
-        # Use static map, validating each voice still exists
-        for voice_type, voice_id in _STATIC_VOICE_MAP.items():
-            if voice_id in valid_ids:
-                _VOICE_MAP[voice_type] = voice_id
-            elif voices:
-                _VOICE_MAP[voice_type] = voices[0]["voice_id"]
-
-        print(f"✅ Voice map: {len(_VOICE_MAP)} types from {len(voices)} voices")
-        for vtype, vid in _VOICE_MAP.items():
-            print(f"   {vtype} -> {id_to_name.get(vid, '?')} ({vid})")
-
-    except Exception as e:
-        print(f"❌ Voice map init failed: {e}")
-        # Fall back to static map without validation
-        _VOICE_MAP.update(_STATIC_VOICE_MAP)
+    """Build name lookup from My Voices."""
+    global _voice_name_to_id
+    _voice_name_to_id = {name: vid for name, vid in MY_VOICES.items()}
+    print(f"✅ Voice library: {len(MY_VOICES)} custom voices")
+    for name, vid in MY_VOICES.items():
+        role = "(NARRATOR)" if name == "edward" else ""
+        print(f"   {name} -> {vid} {role}")
 
 
-def get_voice_id(voice_type: str, character_voice_id: str = None) -> str:
-    """Resolve voice ID: character override > type map > default."""
-    if character_voice_id:
-        return character_voice_id
-    return _VOICE_MAP.get(voice_type, DEFAULT_NARRATOR_VOICE)
+def get_voice_list_for_prompt() -> str:
+    """Return a formatted list of available voices for Claude to pick from."""
+    descriptions = {
+        "jerry_b": "Jerry B — male, brash, mischievous, strong New York Italian energy",
+        "blondie": "Blondie — female, seductive, soft-spoken, young British",
+        "ivanna": "Ivanna — female, seductive, intimate, luxurious American",
+        "the_elf": "The Elf — neutral/quirky, small and cheerful, fast-talking expert",
+        "brad": "Brad — male, welcoming, casual, friendly young American",
+        "preston": "Preston — male, warm bedtime-story voice, bass-baritone, soothing",
+        "hannah": "Hannah Jayne — female, natural, neutral Australian, conversational",
+        "emily": "Emily — female, middle-aged Australian, clear and informative",
+    }
+    return "\n".join(f"- `{name}`: {desc}" for name, desc in descriptions.items())
+
+
+def resolve_voice_id(voice_name: str) -> str:
+    """Resolve a voice name (from Claude's pick) to an ElevenLabs voice ID."""
+    if not voice_name:
+        return NARRATOR_VOICE
+    # Normalize: lowercase, strip whitespace
+    normalized = voice_name.strip().lower().replace(" ", "_").replace("-", "_")
+    # Try direct match
+    if normalized in _voice_name_to_id:
+        return _voice_name_to_id[normalized]
+    # Try partial match
+    for name, vid in _voice_name_to_id.items():
+        if name in normalized or normalized in name:
+            return vid
+    print(f"⚠️ Unknown voice name '{voice_name}', falling back to narrator")
+    return NARRATOR_VOICE
 
 
 def generate_speech(text: str, voice_id: str, game_id: str, label: str = "audio") -> str | None:

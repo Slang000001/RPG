@@ -31,7 +31,7 @@ Respond with ONLY valid JSON matching this exact structure:
       "line": "What they say — in character, reactive to events. 1-2 sentences max."
     }
   ],
-  "image_prompt": "A detailed visual description for image generation based on the NEW scene state. Art style, composition, lighting, key elements. Describe the scene independently — do NOT reference narration text. Example: 'Watercolor illustration of a sunlit forest clearing with ancient stone ruins, a wounded elf leaning against a pillar, wildflowers growing through cracked flagstones, dappled light filtering through canopy'",
+  "image_prompt": "A detailed visual description for image generation based on the NEW scene state. CRITICAL: Include each visible character's full appearance description (from the characters list) so they look consistent across all scenes. Art style, composition, lighting, key elements. Do NOT reference narration text.",
   "choices": [
     "First choice — a bold or aggressive option",
     "Second choice — a cautious or diplomatic option",
@@ -62,6 +62,7 @@ Important rules:
 - recent_events should be a rolling window of the last 5 events max
 - Characters who died or left should be removed from characters_present
 - New characters can appear — add them to characters_present
+- The image_prompt MUST include each visible character's full appearance from the characters list for visual consistency
 - The image_prompt must describe the current scene visually, NOT reference the narration
 - Every 5-7 turns, escalate the stakes or introduce a twist
 - If inventory/plot_flags suggest something should happen, make it happen
