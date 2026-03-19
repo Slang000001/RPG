@@ -2,6 +2,7 @@
 
 import os
 import base64
+import time
 import requests
 import uuid
 import db
@@ -22,38 +23,49 @@ def generate_image(prompt: str, game_id: str) -> str | None:
     # Prepend photorealistic style
     styled_prompt = IMAGE_STYLE_PREFIX + prompt
 
-    try:
-        resp = requests.post(
-            IMAGEN_URL,
-            headers={"x-goog-api-key": GOOGLE_AI_API_KEY},
-            json={
-                "instances": [{"prompt": styled_prompt}],
-                "parameters": {
-                    "sampleCount": 1,
-                    "aspectRatio": "16:9",
-                    "safetyFilterLevel": "BLOCK_ONLY_HIGH"
-                }
-            },
-            timeout=30
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    for attempt in range(3):
+        try:
+            resp = requests.post(
+                IMAGEN_URL,
+                headers={"x-goog-api-key": GOOGLE_AI_API_KEY},
+                json={
+                    "instances": [{"prompt": styled_prompt}],
+                    "parameters": {
+                        "sampleCount": 1,
+                        "aspectRatio": "16:9",
+                        "safetyFilterLevel": "BLOCK_ONLY_HIGH"
+                    }
+                },
+                timeout=30
+            )
 
-        predictions = data.get("predictions", [])
-        if not predictions:
-            print("⚠️ Imagen returned no predictions")
+            if resp.status_code == 429:
+                wait = (attempt + 1) * 5  # 5s, 10s, 15s
+                print(f"⚠️ Imagen rate limited, retrying in {wait}s (attempt {attempt + 1}/3)")
+                time.sleep(wait)
+                continue
+
+            resp.raise_for_status()
+            data = resp.json()
+
+            predictions = data.get("predictions", [])
+            if not predictions:
+                print("⚠️ Imagen returned no predictions")
+                return None
+
+            image_bytes = base64.b64decode(predictions[0]["bytesBase64Encoded"])
+            filename = f"{game_id}/{uuid.uuid4().hex}.png"
+
+            client = db.get_client()
+            client.storage.from_("gauntlet-media").upload(
+                filename, image_bytes,
+                file_options={"content-type": "image/png"}
+            )
+            return client.storage.from_("gauntlet-media").get_public_url(filename)
+
+        except Exception as e:
+            print(f"❌ Image generation failed: {e}")
             return None
 
-        image_bytes = base64.b64decode(predictions[0]["bytesBase64Encoded"])
-        filename = f"{game_id}/{uuid.uuid4().hex}.png"
-
-        client = db.get_client()
-        client.storage.from_("gauntlet-media").upload(
-            filename, image_bytes,
-            file_options={"content-type": "image/png"}
-        )
-        return client.storage.from_("gauntlet-media").get_public_url(filename)
-
-    except Exception as e:
-        print(f"❌ Image generation failed: {e}")
-        return None
+    print("❌ Image generation failed: rate limited after 3 retries")
+    return None
