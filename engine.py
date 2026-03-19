@@ -41,12 +41,13 @@ def _call_claude(prompt: str) -> dict:
         json={
             "model": CLAUDE_MODEL,
             "max_tokens": 4096,
-            "messages": [{"role": "user", "content": prompt}],
-            "response_format": {"type": "json"}
+            "messages": [{"role": "user", "content": prompt}]
         },
         timeout=60
     )
-    resp.raise_for_status()
+    if not resp.ok:
+        print(f"❌ Claude API error {resp.status_code}: {resp.text[:500]}")
+        resp.raise_for_status()
     data = resp.json()
 
     text = data["content"][0]["text"].strip()
