@@ -26,11 +26,8 @@ def _load_prompt(filename: str) -> str:
         return f.read()
 
 
-def _call_claude(prompt: str) -> dict:
-    """Call Claude with JSON mode and return parsed JSON."""
-    if not ANTHROPIC_API_KEY:
-        raise RuntimeError("ANTHROPIC_API_KEY not set")
-
+def _claude_request(messages: list) -> str:
+    """Send messages to Claude, return raw text response."""
     resp = requests.post(
         CLAUDE_URL,
         headers={
@@ -41,26 +38,43 @@ def _call_claude(prompt: str) -> dict:
         json={
             "model": CLAUDE_MODEL,
             "max_tokens": 4096,
-            "messages": [{"role": "user", "content": prompt}]
+            "messages": messages
         },
         timeout=60
     )
     if not resp.ok:
         print(f"❌ Claude API error {resp.status_code}: {resp.text[:500]}")
         resp.raise_for_status()
-    data = resp.json()
+    return resp.json()["content"][0]["text"].strip()
 
-    text = data["content"][0]["text"].strip()
 
-    # Strip markdown code fences if present
+def _parse_json(text: str) -> dict:
+    """Parse JSON from Claude response, stripping markdown fences if present."""
     if text.startswith("```"):
         lines = text.split('\n')
         end = len(lines) - 1
         while end > 0 and lines[end].strip() != '```':
             end -= 1
         text = '\n'.join(lines[1:end]).strip()
-
     return json.loads(text)
+
+
+def _call_claude(prompt: str) -> dict:
+    """Call Claude and return parsed JSON. Retries once on parse failure."""
+    if not ANTHROPIC_API_KEY:
+        raise RuntimeError("ANTHROPIC_API_KEY not set")
+
+    messages = [{"role": "user", "content": prompt}]
+    text = _claude_request(messages)
+
+    try:
+        return _parse_json(text)
+    except json.JSONDecodeError as e:
+        print(f"⚠️ JSON parse failed ({e}), retrying with correction request...")
+        messages.append({"role": "assistant", "content": text})
+        messages.append({"role": "user", "content": "Your response contained invalid JSON. Return the SAME content but fix the JSON syntax errors. Output ONLY valid JSON, no explanation."})
+        text2 = _claude_request(messages)
+        return _parse_json(text2)
 
 
 def _get_characters_for_game(game_id: str) -> list[dict]:
