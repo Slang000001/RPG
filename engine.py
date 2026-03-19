@@ -26,10 +26,148 @@ def _load_prompt(filename: str) -> str:
         return f.read()
 
 
-def _call_claude(prompt: str) -> dict:
-    """Call Claude Sonnet and return parsed JSON."""
+TURN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "narration": {"type": "string"},
+        "dialogue": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "character_name": {"type": "string"},
+                    "line": {"type": "string"}
+                },
+                "required": ["character_name", "line"]
+            }
+        },
+        "image_prompt": {"type": "string"},
+        "choices": {"type": "array", "items": {"type": "string"}},
+        "updated_game_state": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "description": {"type": "string"}
+                    },
+                    "required": ["name", "description"]
+                },
+                "characters_present": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "status": {"type": "string"},
+                            "disposition": {"type": "string"}
+                        },
+                        "required": ["name", "status", "disposition"]
+                    }
+                },
+                "inventory": {"type": "array", "items": {"type": "string"}},
+                "plot_flags": {"type": "object"},
+                "recent_events": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["location", "characters_present", "inventory", "plot_flags", "recent_events"]
+        }
+    },
+    "required": ["narration", "dialogue", "image_prompt", "choices", "updated_game_state"]
+}
+
+WORLD_SEED_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "world_summary": {"type": "string"},
+        "characters": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "appearance": {"type": "string"},
+                    "personality": {"type": "string"},
+                    "voice_name": {"type": "string"}
+                },
+                "required": ["name", "description", "appearance", "personality", "voice_name"]
+            }
+        },
+        "opening_scene": {
+            "type": "object",
+            "properties": {
+                "narration": {"type": "string"},
+                "dialogue": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "character_name": {"type": "string"},
+                            "line": {"type": "string"}
+                        },
+                        "required": ["character_name", "line"]
+                    }
+                },
+                "image_prompt": {"type": "string"},
+                "choices": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["narration", "dialogue", "image_prompt", "choices"]
+        },
+        "initial_game_state": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "description": {"type": "string"}
+                    },
+                    "required": ["name", "description"]
+                },
+                "characters_present": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "status": {"type": "string"},
+                            "disposition": {"type": "string"}
+                        },
+                        "required": ["name", "status", "disposition"]
+                    }
+                },
+                "inventory": {"type": "array", "items": {"type": "string"}},
+                "plot_flags": {"type": "object"},
+                "recent_events": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["location", "characters_present", "inventory", "plot_flags", "recent_events"]
+        }
+    },
+    "required": ["title", "world_summary", "characters", "opening_scene", "initial_game_state"]
+}
+
+
+def _call_claude(prompt: str, schema: dict = None) -> dict:
+    """Call Claude and return parsed JSON. Uses structured output when schema provided."""
     if not ANTHROPIC_API_KEY:
         raise RuntimeError("ANTHROPIC_API_KEY not set")
+
+    body = {
+        "model": CLAUDE_MODEL,
+        "max_tokens": 4096,
+        "messages": [{"role": "user", "content": prompt}]
+    }
+
+    if schema:
+        body["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "game_response",
+                "schema": schema
+            }
+        }
 
     resp = requests.post(
         CLAUDE_URL,
@@ -38,11 +176,7 @@ def _call_claude(prompt: str) -> dict:
             "anthropic-version": "2023-06-01",
             "content-type": "application/json"
         },
-        json={
-            "model": CLAUDE_MODEL,
-            "max_tokens": 4096,
-            "messages": [{"role": "user", "content": prompt}]
-        },
+        json=body,
         timeout=60
     )
     resp.raise_for_status()
@@ -50,10 +184,9 @@ def _call_claude(prompt: str) -> dict:
 
     text = data["content"][0]["text"].strip()
 
-    # Strip markdown code fences if present
+    # Strip markdown code fences if present (non-schema fallback)
     if text.startswith("```"):
         lines = text.split('\n')
-        # Remove first line (```json) and last line (```)
         end = len(lines) - 1
         while end > 0 and lines[end].strip() != '```':
             end -= 1
@@ -153,7 +286,7 @@ def create_game(user_id: str, setting: str, tone: str, genre: str, character_des
                       .replace("{{characters}}", characters_text) \
                       .replace("{{voice_list}}", get_voice_list_for_prompt())
 
-    seed = _call_claude(prompt)
+    seed = _call_claude(prompt, WORLD_SEED_SCHEMA)
     client = db.get_client()
 
     # Create game
@@ -242,7 +375,7 @@ def _precompute_choices(game_id: str, turn_number: int, game: dict,
         cache_key = (game_id, turn_number, choice_num)
         try:
             prompt = _build_turn_prompt(game, game_state, characters, choice_text)
-            result = _call_claude(prompt)
+            result = _call_claude(prompt, TURN_SCHEMA)
             _precomputed[cache_key] = result
             print(f"✅ Precomputed choice {choice_num} for turn {turn_number} of game {game_id[:8]}")
         except Exception as e:
@@ -281,7 +414,7 @@ def process_turn(game_id: str, player_choice: int) -> dict:
         # Cache miss — generate on the fly
         choice_text = choices[player_choice - 1] if 0 < player_choice <= len(choices) else "Unknown"
         prompt = _build_turn_prompt(game, game_state, characters, choice_text)
-        result = _call_claude(prompt)
+        result = _call_claude(prompt, TURN_SCHEMA)
         print(f"🐌 Cache miss for choice {player_choice} on turn {latest_turn['turn_number']}")
 
     new_state = result.get("updated_game_state", game_state)
