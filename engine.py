@@ -295,21 +295,10 @@ def _precompute_single_choice(game_id: str, turn_number: int, choice_num: int,
 
 def _precompute_choices(game_id: str, turn_number: int, game: dict,
                         game_state: dict, characters: list, choices: list):
-    """Background: precompute Claude responses + full media for all 3 choices in parallel."""
-    futures = []
+    """Background: precompute Claude responses + full media sequentially to avoid rate limits."""
     for i, choice_text in enumerate(choices):
-        future = _executor.submit(
-            _precompute_single_choice, game_id, turn_number, i + 1,
-            game, game_state, characters, choice_text
-        )
-        futures.append(future)
-
-    # Wait for all to finish
-    for f in futures:
-        try:
-            f.result(timeout=120)
-        except Exception:
-            pass
+        _precompute_single_choice(game_id, turn_number, i + 1,
+                                  game, game_state, characters, choice_text)
 
     # Clean old entries (keep only current turn's precomputes per game)
     stale = [k for k in _precomputed if k[0] == game_id and k[1] != turn_number]
