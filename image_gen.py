@@ -8,7 +8,7 @@ import uuid
 import db
 
 GOOGLE_AI_API_KEY = os.environ.get('GOOGLE_AI_API_KEY')
-IMAGEN_URL = "https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict"
+IMAGEN_URL = "https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-fast-generate-001:predict"
 
 
 IMAGE_STYLE_PREFIX = "Photorealistic, dramatic cinematic lighting, high detail. "
