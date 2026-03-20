@@ -1,69 +1,70 @@
-"""Gemini Imagen wrapper — REST API, no SDK."""
+"""DALL-E 3 image generation — OpenAI API."""
 
 import os
-import base64
 import time
 import requests
 import uuid
 import db
 
-GOOGLE_AI_API_KEY = os.environ.get('GOOGLE_AI_API_KEY')
-IMAGEN_URL = "https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-fast-generate-001:predict"
-
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
+DALLE_URL = "https://api.openai.com/v1/images/generations"
 
 IMAGE_STYLE_PREFIX = "Photorealistic, dramatic cinematic lighting, high detail. "
 
 
 def generate_image(prompt: str, game_id: str) -> str | None:
-    """Generate image via Gemini Imagen, upload to Supabase Storage. Returns public URL."""
-    if not GOOGLE_AI_API_KEY:
-        print("⚠️ GOOGLE_AI_API_KEY not set — skipping image generation")
+    """Generate image via DALL-E 3, upload to Supabase Storage. Returns public URL."""
+    if not OPENAI_API_KEY:
+        print("⚠️ OPENAI_API_KEY not set — skipping image generation")
         return None
 
-    # Prepend photorealistic style
     styled_prompt = IMAGE_STYLE_PREFIX + prompt
 
     for attempt in range(3):
         try:
             resp = requests.post(
-                IMAGEN_URL,
-                headers={"x-goog-api-key": GOOGLE_AI_API_KEY},
-                json={
-                    "instances": [{"prompt": styled_prompt}],
-                    "parameters": {
-                        "sampleCount": 1,
-                        "aspectRatio": "16:9",
-                        "safetyFilterLevel": "BLOCK_ONLY_HIGH"
-                    }
+                DALLE_URL,
+                headers={
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Content-Type": "application/json"
                 },
-                timeout=30
+                json={
+                    "model": "dall-e-3",
+                    "prompt": styled_prompt,
+                    "n": 1,
+                    "size": "1792x1024",
+                    "quality": "standard"
+                },
+                timeout=45
             )
 
             if resp.status_code == 429:
-                wait = (attempt + 1) * 5  # 5s, 10s, 15s
-                print(f"⚠️ Imagen rate limited, retrying in {wait}s (attempt {attempt + 1}/3)")
+                wait = (attempt + 1) * 5
+                print(f"⚠️ DALL-E rate limited, retrying in {wait}s (attempt {attempt + 1}/3)")
                 time.sleep(wait)
                 continue
 
             resp.raise_for_status()
             data = resp.json()
 
-            predictions = data.get("predictions", [])
-            if not predictions:
-                print("⚠️ Imagen returned no predictions")
-                return None
+            image_url = data["data"][0]["url"]
 
-            image_bytes = base64.b64decode(predictions[0]["bytesBase64Encoded"])
+            # Download the image from OpenAI's temporary URL
+            img_resp = requests.get(image_url, timeout=30)
+            img_resp.raise_for_status()
+
             filename = f"{game_id}/{uuid.uuid4().hex}.png"
-
             client = db.get_client()
             client.storage.from_("gauntlet-media").upload(
-                filename, image_bytes,
+                filename, img_resp.content,
                 file_options={"content-type": "image/png"}
             )
             return client.storage.from_("gauntlet-media").get_public_url(filename)
 
         except Exception as e:
+            if attempt < 2 and "rate" in str(e).lower():
+                time.sleep((attempt + 1) * 5)
+                continue
             print(f"❌ Image generation failed: {e}")
             return None
 

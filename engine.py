@@ -1,4 +1,4 @@
-"""Game engine — Claude integration, game state management, parallel media pipeline."""
+"""Game engine — GPT integration, game state management, parallel media pipeline."""
 
 import json
 import os
@@ -9,9 +9,9 @@ import db
 from image_gen import generate_image
 from voice_gen import generate_speech, resolve_voice_id, get_voice_list_for_prompt, NARRATOR_VOICE
 
-ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
-CLAUDE_MODEL = "claude-haiku-4-5-20251001"
-CLAUDE_URL = "https://api.anthropic.com/v1/messages"
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
+GPT_MODEL = "gpt-4.1-mini"
+OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 
 _executor = ThreadPoolExecutor(max_workers=12)
 
@@ -26,55 +26,39 @@ def _load_prompt(filename: str) -> str:
         return f.read()
 
 
-def _claude_request(messages: list) -> str:
-    """Send messages to Claude, return raw text response."""
+def _gpt_request(messages: list) -> str:
+    """Send messages to OpenAI, return raw text response."""
     resp = requests.post(
-        CLAUDE_URL,
+        OPENAI_URL,
         headers={
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/json"
         },
         json={
-            "model": CLAUDE_MODEL,
+            "model": GPT_MODEL,
             "max_tokens": 4096,
-            "messages": messages
+            "messages": messages,
+            "response_format": {"type": "json_object"}
         },
         timeout=60
     )
     if not resp.ok:
-        print(f"❌ Claude API error {resp.status_code}: {resp.text[:500]}")
+        print(f"❌ GPT API error {resp.status_code}: {resp.text[:500]}")
         resp.raise_for_status()
-    return resp.json()["content"][0]["text"].strip()
+    return resp.json()["choices"][0]["message"]["content"].strip()
 
 
-def _parse_json(text: str) -> dict:
-    """Parse JSON from Claude response, stripping markdown fences if present."""
-    if text.startswith("```"):
-        lines = text.split('\n')
-        end = len(lines) - 1
-        while end > 0 and lines[end].strip() != '```':
-            end -= 1
-        text = '\n'.join(lines[1:end]).strip()
+def _call_llm(prompt: str) -> dict:
+    """Call GPT and return parsed JSON. Uses json_object mode for guaranteed valid JSON."""
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY not set")
+
+    messages = [
+        {"role": "system", "content": "You are a game master. Always respond with valid JSON only."},
+        {"role": "user", "content": prompt}
+    ]
+    text = _gpt_request(messages)
     return json.loads(text)
-
-
-def _call_claude(prompt: str) -> dict:
-    """Call Claude and return parsed JSON. Retries once on parse failure."""
-    if not ANTHROPIC_API_KEY:
-        raise RuntimeError("ANTHROPIC_API_KEY not set")
-
-    messages = [{"role": "user", "content": prompt}]
-    text = _claude_request(messages)
-
-    try:
-        return _parse_json(text)
-    except json.JSONDecodeError as e:
-        print(f"⚠️ JSON parse failed ({e}), retrying with correction request...")
-        messages.append({"role": "assistant", "content": text})
-        messages.append({"role": "user", "content": "Your response contained invalid JSON. Return the SAME content but fix the JSON syntax errors. Output ONLY valid JSON, no explanation."})
-        text2 = _claude_request(messages)
-        return _parse_json(text2)
 
 
 def _get_characters_for_game(game_id: str) -> list[dict]:
@@ -184,7 +168,7 @@ def create_game(user_id: str, setting: str, tone: str, genre: str, player: dict,
                       .replace("{{characters}}", characters_text) \
                       .replace("{{voice_list}}", get_voice_list_for_prompt())
 
-    seed = _call_claude(prompt)
+    seed = _call_llm(prompt)
     client = db.get_client()
 
     # Create game
@@ -278,7 +262,7 @@ def _precompute_single_choice(game_id: str, turn_number: int, choice_num: int,
     cache_key = (game_id, turn_number, choice_num)
     try:
         prompt = _build_turn_prompt(game, game_state, characters, choice_text)
-        result = _call_claude(prompt)
+        result = _call_llm(prompt)
 
         # Generate full media for this branch
         media = _generate_turn_media(
@@ -336,7 +320,7 @@ def process_turn(game_id: str, player_choice: int) -> dict:
         # Cache miss — generate on the fly
         choice_text = choices[player_choice - 1] if 0 < player_choice <= len(choices) else "Unknown"
         prompt = _build_turn_prompt(game, game_state, characters, choice_text)
-        result = _call_claude(prompt)
+        result = _call_llm(prompt)
         media = None
         print(f"🐌 Cache miss for choice {player_choice} on turn {latest_turn['turn_number']}")
 
