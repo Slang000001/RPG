@@ -75,10 +75,17 @@ def resolve_voice_id(voice_name: str) -> str:
     return NARRATOR_VOICE
 
 
+def _sanitize_label(label: str) -> str:
+    """Remove characters that break storage filenames."""
+    import re
+    return re.sub(r'[^a-zA-Z0-9_\-]', '_', label)
+
+
 def generate_speech(text: str, voice_id: str, game_id: str, label: str = "audio") -> str | None:
     """Generate TTS audio, upload to Supabase Storage. Retries on rate limit."""
     if not ELEVENLABS_API_KEY:
         return None
+    label = _sanitize_label(label)
 
     for attempt in range(3):
         try:
