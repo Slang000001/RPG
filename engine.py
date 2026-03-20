@@ -10,7 +10,7 @@ from image_gen import generate_image
 from voice_gen import generate_speech, resolve_voice_id, get_voice_list_for_prompt, NARRATOR_VOICE
 
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
-GPT_MODEL = "gpt-4.1-mini"
+GPT_MODEL = "gpt-5.2-chat-latest"
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 
 _executor = ThreadPoolExecutor(max_workers=12)
