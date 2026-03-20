@@ -236,8 +236,9 @@ def create_game(user_id: str, setting: str, tone: str, genre: str, player: dict,
     initial_state["player_appearance"] = player["appearance"]
     initial_state["player_portrait_url"] = player_portrait_url
     # Store short image tags for each character (used in image prompts)
+    # Player tag uses their original input verbatim — they already wrote it concise
     initial_state["image_tags"] = {
-        player["name"]: f"player character, {player['appearance'][:60]}"
+        player["name"]: f"player character, {player['appearance']}"
     }
     for char_data in seed.get("characters", []):
         tag = char_data.get("image_tag", "")
