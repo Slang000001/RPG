@@ -372,6 +372,10 @@ def process_turn(game_id: str, player_choice: int) -> dict:
     new_state["world_summary"] = game.get("world_summary", "")
     new_state["tone"] = game.get("tone", "")
     new_state["genre"] = game.get("genre", "")
+    # Preserve locked fields that GPT doesn't know about
+    for key in ("image_tags", "player_name", "player_appearance", "player_portrait_url"):
+        if key in game_state and key not in new_state:
+            new_state[key] = game_state[key]
 
     if media:
         # Full precompute — save turn WITH media
