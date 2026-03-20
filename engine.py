@@ -36,7 +36,7 @@ def _gpt_request(messages: list) -> str:
         },
         json={
             "model": GPT_MODEL,
-            "max_tokens": 4096,
+            "max_completion_tokens": 4096,
             "messages": messages,
             "response_format": {"type": "json_object"}
         },
