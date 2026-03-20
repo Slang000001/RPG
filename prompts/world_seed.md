@@ -28,7 +28,7 @@ Respond with ONLY valid JSON matching this exact structure:
       "name": "Character Name",
       "description": "Role in the world (1-2 sentences)",
       "appearance": "Detailed physical description: ethnicity/race, age range, skin tone, hair color+style, eye color, build, height, clothing, distinguishing features.",
-      "image_tag": "EXACTLY this format, under 15 words: 'ethnicity gender age, hair, one clothing item'. Example: 'Korean woman early 30s, long black braids, leather duster coat'",
+      "image_tag": "Under 30 words. Format: 'ethnicity gender age, build, hair, clothing, signature weapon/item'. Include everything that makes this character visually unique. Example: 'Filipina woman mid-20s, 5-foot athletic build, waist-length black ponytail, green cargo pants, black combat boots, retractable laser sword'",
       "personality": "Personality traits, motivations, speech patterns (1-2 sentences)",
       "voice_name": "one of the voice names above (e.g. jerry_b, blondie, etc.)"
     }
