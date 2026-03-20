@@ -31,7 +31,7 @@ Respond with ONLY valid JSON matching this exact structure:
       "line": "What they say — in character, reactive to events. 1-2 sentences max."
     }
   ],
-  "image_prompt": "MUST be under 500 words. Include a concise summary of each visible character's key appearance traits (skin color, hair, clothing — 1 sentence each, not the full description). Then describe the scene: environment, composition, action, mood. Keep it tight.",
+  "image_prompt": "MUST be under 500 words. You MUST include ALL characters from characters_present — no exceptions, do not skip anyone. For each: 1 sentence with their key appearance (skin, hair, clothing). Then describe the scene: environment, composition, action, mood.",
   "choices": [
     "First choice — a bold or aggressive option",
     "Second choice — a cautious or diplomatic option",
