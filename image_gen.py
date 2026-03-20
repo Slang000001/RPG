@@ -32,7 +32,7 @@ def generate_image(prompt: str, game_id: str) -> str | None:
                 "version": "7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc",
                 "input": {
                     "prompt": styled_prompt,
-                    "negative_prompt": "blurry, low quality, distorted, deformed, cartoon, anime, illustration",
+                    "negative_prompt": "blurry, low quality, distorted, deformed, cartoon, anime, illustration, duplicate characters, mirrored, split image, collage, multiple views, diptych, side by side comparison",
                     "width": 1344,
                     "height": 768,
                     "num_outputs": 1,
