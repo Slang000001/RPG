@@ -1,4 +1,4 @@
-"""Replicate SDXL image generation — no content filter, no rate limit drama."""
+"""Replicate Flux 1.1 Pro image generation — best quality, no content filter."""
 
 import os
 import time
@@ -10,9 +10,7 @@ REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
 REPLICATE_URL = "https://api.replicate.com/v1/predictions"
 
 IMAGE_STYLE_PREFIX = "Photorealistic, dramatic cinematic lighting, high detail. "
-NEGATIVE_PROMPT = "blurry, low quality, distorted, deformed, cartoon, anime, illustration, duplicate characters, mirrored, split image, collage, multiple views, diptych"
-
-SDXL_VERSION = "7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc"
+FLUX_PRO_VERSION = "609793a667ed94b210242837d3c3c9fc9a64ae93685f15d75002ba0ed9a97f2b"
 
 
 def _run_prediction(payload: dict) -> str | None:
@@ -97,15 +95,12 @@ def generate_portrait(description: str, game_id: str) -> str | None:
 
     prompt = f"Portrait headshot, photorealistic, studio lighting, neutral background. {description}"
     img_url = _run_prediction({
-        "version": SDXL_VERSION,
+        "version": FLUX_PRO_VERSION,
         "input": {
             "prompt": prompt,
-            "negative_prompt": NEGATIVE_PROMPT,
-            "width": 768,
-            "height": 768,
-            "num_outputs": 1,
-            "guidance_scale": 7.5,
-            "num_inference_steps": 30
+            "aspect_ratio": "1:1",
+            "output_format": "png",
+            "safety_tolerance": 5
         }
     })
     if not img_url:
@@ -122,15 +117,12 @@ def generate_image(prompt: str, game_id: str, face_urls: list[str] = None) -> st
     styled_prompt = IMAGE_STYLE_PREFIX + prompt
 
     img_url = _run_prediction({
-        "version": SDXL_VERSION,
+        "version": FLUX_PRO_VERSION,
         "input": {
             "prompt": styled_prompt,
-            "negative_prompt": NEGATIVE_PROMPT,
-            "width": 1344,
-            "height": 768,
-            "num_outputs": 1,
-            "guidance_scale": 7.5,
-            "num_inference_steps": 30
+            "aspect_ratio": "16:9",
+            "output_format": "png",
+            "safety_tolerance": 5
         }
     })
     if not img_url:
