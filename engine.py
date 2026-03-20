@@ -6,7 +6,7 @@ import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import db
-from image_gen import generate_image
+from image_gen import generate_image, generate_portrait
 from voice_gen import generate_speech, resolve_voice_id, get_voice_list_for_prompt, NARRATOR_VOICE
 
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
@@ -82,13 +82,28 @@ def _find_character(char_name: str, characters: list) -> dict:
     return {}
 
 
-def _generate_turn_media(game_id: str, narration: str, dialogue: list, characters: list, image_prompt: str) -> dict:
+def _get_face_urls(characters: list, game_state: dict = None) -> list[str]:
+    """Collect portrait URLs from characters present in the scene."""
+    urls = []
+    # Player portrait if available
+    if game_state and game_state.get("player_portrait_url"):
+        urls.append(game_state["player_portrait_url"])
+    # NPC portraits
+    for c in characters:
+        portrait = c.get("voice_id_portrait") or c.get("portrait_url")
+        if portrait:
+            urls.append(portrait)
+    return urls
+
+
+def _generate_turn_media(game_id: str, narration: str, dialogue: list, characters: list, image_prompt: str, game_state: dict = None) -> dict:
     """Generate image in parallel with sequential TTS to avoid socket exhaustion."""
 
     # Image generation runs in parallel with audio
+    face_urls = _get_face_urls(characters, game_state)
     image_future = None
     if image_prompt:
-        image_future = _executor.submit(generate_image, image_prompt, game_id)
+        image_future = _executor.submit(generate_image, image_prompt, game_id, face_urls or None)
 
     # TTS runs sequentially to avoid resource exhaustion
     narration_audio_url = None
@@ -120,10 +135,10 @@ def _generate_turn_media(game_id: str, narration: str, dialogue: list, character
 
 
 def _generate_and_update_media(turn_id: str, game_id: str, narration: str,
-                                dialogue: list, characters: list, image_prompt: str):
+                                dialogue: list, characters: list, image_prompt: str, game_state: dict = None):
     """Background task: generate media and update the turn row in DB."""
     try:
-        media = _generate_turn_media(game_id, narration, dialogue, characters, image_prompt)
+        media = _generate_turn_media(game_id, narration, dialogue, characters, image_prompt, game_state)
         client = db.get_client()
         client.table("gauntlet_turns").update({
             "image_url": media["image_url"],
@@ -184,17 +199,25 @@ def create_game(user_id: str, setting: str, tone: str, genre: str, player: dict,
     game = game_result.data[0]
     game_id = game["id"]
 
-    # Create characters
+    # Generate player portrait
+    print(f"🎨 Generating player portrait for {player['name']}...")
+    player_portrait_url = generate_portrait(player["appearance"], game_id)
+
+    # Create characters + generate portraits
     characters = []
     for char_data in seed.get("characters", []):
         voice_name = char_data.get("voice_name", "")
+        appearance = char_data.get("appearance", char_data.get("description", ""))
+        print(f"🎨 Generating portrait for {char_data['name']}...")
+        portrait_url = generate_portrait(appearance, game_id)
         char_result = client.table("gauntlet_characters").insert({
             "game_id": game_id,
             "name": char_data["name"],
-            "description": char_data.get("appearance", char_data.get("description", "")),
+            "description": appearance,
             "personality": char_data.get("personality", ""),
-            "voice_type": voice_name,  # stores voice_name for lookup
-            "voice_id": resolve_voice_id(voice_name),  # resolved ElevenLabs ID
+            "voice_type": voice_name,
+            "voice_id": resolve_voice_id(voice_name),
+            "portrait_url": portrait_url,
         }).execute()
         characters.append(char_result.data[0])
 
@@ -207,6 +230,7 @@ def create_game(user_id: str, setting: str, tone: str, genre: str, player: dict,
     initial_state["genre"] = genre
     initial_state["player_name"] = player["name"]
     initial_state["player_appearance"] = player["appearance"]
+    initial_state["player_portrait_url"] = player_portrait_url
 
     # Save turn 0 immediately with text (no media yet)
     dialogue_no_audio = [{"character_name": d.get("character_name", ""), "line": d.get("line", "")}
@@ -225,7 +249,7 @@ def create_game(user_id: str, setting: str, tone: str, genre: str, player: dict,
     # Fire media generation in background
     _executor.submit(_generate_and_update_media, turn["id"], game_id,
                      opening["narration"], opening.get("dialogue", []),
-                     characters, opening.get("image_prompt", ""))
+                     characters, opening.get("image_prompt", ""), initial_state)
 
     # Precompute all 3 choices for turn 0 in background
     opening_choices = opening.get("choices", [])
@@ -268,7 +292,7 @@ def _precompute_single_choice(game_id: str, turn_number: int, choice_num: int,
         media = _generate_turn_media(
             game_id, result.get("narration", ""),
             result.get("dialogue", []), characters,
-            result.get("image_prompt", "")
+            result.get("image_prompt", ""), game_state
         )
 
         _precomputed[cache_key] = {"result": result, "media": media}
@@ -359,7 +383,7 @@ def process_turn(game_id: str, player_choice: int) -> dict:
         }).execute()
         _executor.submit(_generate_and_update_media, turn_result.data[0]["id"], game_id,
                          result.get("narration", ""), result.get("dialogue", []),
-                         characters, result.get("image_prompt", ""))
+                         characters, result.get("image_prompt", ""), new_state)
 
     turn = turn_result.data[0]
 
