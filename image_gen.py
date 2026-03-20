@@ -1,4 +1,4 @@
-"""DALL-E 3 image generation — OpenAI API."""
+"""Replicate SDXL image generation — no content filter, no rate limit drama."""
 
 import os
 import time
@@ -6,72 +6,96 @@ import requests
 import uuid
 import db
 
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
-DALLE_URL = "https://api.openai.com/v1/images/generations"
+REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
+REPLICATE_URL = "https://api.replicate.com/v1/predictions"
 
 IMAGE_STYLE_PREFIX = "Photorealistic, dramatic cinematic lighting, high detail. "
 
 
 def generate_image(prompt: str, game_id: str) -> str | None:
-    """Generate image via DALL-E 3, upload to Supabase Storage. Returns public URL."""
-    if not OPENAI_API_KEY:
-        print("⚠️ OPENAI_API_KEY not set — skipping image generation")
+    """Generate image via Replicate SDXL, upload to Supabase Storage. Returns public URL."""
+    if not REPLICATE_API_TOKEN:
+        print("⚠️ REPLICATE_API_TOKEN not set — skipping image generation")
         return None
 
     styled_prompt = IMAGE_STYLE_PREFIX + prompt
-    # DALL-E 3 has a 4000 char prompt limit
-    if len(styled_prompt) > 3900:
-        styled_prompt = styled_prompt[:3900]
 
-    for attempt in range(3):
-        try:
-            resp = requests.post(
-                DALLE_URL,
-                headers={
-                    "Authorization": f"Bearer {OPENAI_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "dall-e-3",
+    try:
+        # Create prediction
+        resp = requests.post(
+            REPLICATE_URL,
+            headers={
+                "Authorization": f"Bearer {REPLICATE_API_TOKEN}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "version": "7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc",
+                "input": {
                     "prompt": styled_prompt,
-                    "n": 1,
-                    "size": "1792x1024",
-                    "quality": "standard"
-                },
-                timeout=45
-            )
+                    "negative_prompt": "blurry, low quality, distorted, deformed, cartoon, anime, illustration",
+                    "width": 1344,
+                    "height": 768,
+                    "num_outputs": 1,
+                    "guidance_scale": 7.5,
+                    "num_inference_steps": 30
+                }
+            },
+            timeout=30
+        )
 
-            if resp.status_code == 429:
-                wait = (attempt + 1) * 5
-                print(f"⚠️ DALL-E rate limited, retrying in {wait}s (attempt {attempt + 1}/3)")
-                time.sleep(wait)
-                continue
+        if not resp.ok:
+            print(f"❌ Replicate create error {resp.status_code}: {resp.text[:300]}")
+            resp.raise_for_status()
 
-            if not resp.ok:
-                print(f"❌ DALL-E error {resp.status_code}: {resp.text[:300]}")
-                resp.raise_for_status()
-            data = resp.json()
+        prediction = resp.json()
+        prediction_url = prediction.get("urls", {}).get("get")
 
-            image_url = data["data"][0]["url"]
-
-            # Download the image from OpenAI's temporary URL
-            img_resp = requests.get(image_url, timeout=30)
-            img_resp.raise_for_status()
-
-            filename = f"{game_id}/{uuid.uuid4().hex}.png"
-            client = db.get_client()
-            client.storage.from_("gauntlet-media").upload(
-                filename, img_resp.content,
-                file_options={"content-type": "image/png"}
-            )
-            return client.storage.from_("gauntlet-media").get_public_url(filename)
-
-        except Exception as e:
-            if attempt < 2 and "rate" in str(e).lower():
-                time.sleep((attempt + 1) * 5)
-                continue
-            print(f"❌ Image generation failed: {e}")
+        if not prediction_url:
+            print("❌ No prediction URL returned")
             return None
 
-    print("❌ Image generation failed: rate limited after 3 retries")
-    return None
+        # Poll for completion
+        for _ in range(60):  # up to 60s
+            time.sleep(1)
+            poll = requests.get(
+                prediction_url,
+                headers={"Authorization": f"Bearer {REPLICATE_API_TOKEN}"},
+                timeout=10
+            )
+            poll_data = poll.json()
+            status = poll_data.get("status")
+
+            if status == "succeeded":
+                output = poll_data.get("output", [])
+                if not output:
+                    print("⚠️ SDXL returned no output")
+                    return None
+
+                # Download image from Replicate's temporary URL
+                img_url = output[0]
+                img_resp = requests.get(img_url, timeout=30)
+                img_resp.raise_for_status()
+
+                filename = f"{game_id}/{uuid.uuid4().hex}.png"
+                client = db.get_client()
+                client.storage.from_("gauntlet-media").upload(
+                    filename, img_resp.content,
+                    file_options={"content-type": "image/png"}
+                )
+                return client.storage.from_("gauntlet-media").get_public_url(filename)
+
+            elif status == "failed":
+                error = poll_data.get("error", "unknown")
+                print(f"❌ SDXL prediction failed: {error}")
+                return None
+
+            elif status == "canceled":
+                print("❌ SDXL prediction canceled")
+                return None
+
+        print("❌ SDXL prediction timed out after 60s")
+        return None
+
+    except Exception as e:
+        print(f"❌ Image generation failed: {e}")
+        return None
