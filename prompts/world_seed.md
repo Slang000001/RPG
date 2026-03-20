@@ -13,7 +13,9 @@ Create a complete world seed with an opening scene. The world should feel alive,
 For each character, pick a `voice_name` from this list that best fits their personality:
 {{voice_list}}
 
-Also give each character a detailed `appearance` — this is LOCKED for the entire game and will be copy-pasted into every image prompt verbatim. Be extremely specific using PHYSICAL descriptors only (no race/ethnicity labels): exact skin color (e.g. "pale ivory skin", "warm brown skin", "deep dark brown skin"), hair color AND style, eye color, build, height, exact clothing, distinguishing features (scars, tattoos, accessories). The more specific the physical details, the more consistent the character will look across all scenes.
+Also give each character a detailed `appearance` and a short `image_tag`. The appearance is LOCKED for the entire game. Include: ethnicity/race, age range, skin tone, hair color+style, eye color, build, height, exact clothing, distinguishing features. Be specific — "Korean woman in her early 30s" is better than vague physical descriptions.
+
+The `image_tag` is a compressed version (under 15 words) used for image generation prompts. Format: "ethnicity gender age, hair, one key clothing item."
 
 ## Response Format
 Respond with ONLY valid JSON matching this exact structure:
@@ -25,7 +27,8 @@ Respond with ONLY valid JSON matching this exact structure:
     {
       "name": "Character Name",
       "description": "Role in the world (1-2 sentences)",
-      "appearance": "Detailed PHYSICAL description only (no race labels): exact skin color, hair color+style, eye color, build, height, clothing, distinguishing features. Example: 'Tall woman, warm olive skin, long black braided hair, dark brown eyes, lean athletic build, worn leather duster coat, red bandana around neck, rifle slung over shoulder, small scar on left cheek'",
+      "appearance": "Detailed physical description: ethnicity/race, age range, skin tone, hair color+style, eye color, build, height, clothing, distinguishing features.",
+      "image_tag": "EXACTLY this format, under 15 words: 'ethnicity gender age, hair, one clothing item'. Example: 'Korean woman early 30s, long black braids, leather duster coat'",
       "personality": "Personality traits, motivations, speech patterns (1-2 sentences)",
       "voice_name": "one of the voice names above (e.g. jerry_b, blondie, etc.)"
     }

@@ -235,6 +235,14 @@ def create_game(user_id: str, setting: str, tone: str, genre: str, player: dict,
     initial_state["player_name"] = player["name"]
     initial_state["player_appearance"] = player["appearance"]
     initial_state["player_portrait_url"] = player_portrait_url
+    # Store short image tags for each character (used in image prompts)
+    initial_state["image_tags"] = {
+        player["name"]: f"player character, {player['appearance'][:60]}"
+    }
+    for char_data in seed.get("characters", []):
+        tag = char_data.get("image_tag", "")
+        if tag:
+            initial_state["image_tags"][char_data["name"]] = tag
 
     # Save turn 0 immediately with text (no media yet)
     dialogue_no_audio = [{"character_name": d.get("character_name", ""), "line": d.get("line", "")}
@@ -276,10 +284,15 @@ def _build_turn_prompt(game: dict, game_state: dict, characters: list, choice_te
         for c in characters
     )
     characters_text = f"{player_line}\n{npc_lines}" if player_line else npc_lines
-    print(f"📋 CHARACTERS IN PROMPT ({len(characters)+1 if player_line else len(characters)}):\n{characters_text[:500]}")
+    # Build image tags block
+    image_tags = game_state.get("image_tags", {})
+    image_tags_text = "\n".join(f"- {name}: {tag}" for name, tag in image_tags.items())
+    print(f"📋 CHARACTERS IN PROMPT ({len(characters)+1 if player_line else len(characters)})")
+    print(f"🏷️ IMAGE TAGS:\n{image_tags_text}")
     return template.replace("{{world_summary}}", game.get("world_summary", "")) \
                    .replace("{{game_state}}", json.dumps(game_state, indent=2)) \
                    .replace("{{characters}}", characters_text) \
+                   .replace("{{image_tags}}", image_tags_text) \
                    .replace("{{player_choice}}", choice_text) \
                    .replace("{{tone}}", game.get("tone", "")) \
                    .replace("{{genre}}", game.get("genre", ""))
