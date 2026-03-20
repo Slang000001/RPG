@@ -58,7 +58,11 @@ def _call_llm(prompt: str) -> dict:
         {"role": "user", "content": prompt}
     ]
     text = _gpt_request(messages)
-    return json.loads(text)
+    result = json.loads(text)
+    # Log the image prompt for debugging
+    if result.get("image_prompt"):
+        print(f"🖼️ IMAGE PROMPT: {result['image_prompt'][:500]}")
+    return result
 
 
 def _get_characters_for_game(game_id: str) -> list[dict]:
@@ -272,6 +276,7 @@ def _build_turn_prompt(game: dict, game_state: dict, characters: list, choice_te
         for c in characters
     )
     characters_text = f"{player_line}\n{npc_lines}" if player_line else npc_lines
+    print(f"📋 CHARACTERS IN PROMPT ({len(characters)+1 if player_line else len(characters)}):\n{characters_text[:500]}")
     return template.replace("{{world_summary}}", game.get("world_summary", "")) \
                    .replace("{{game_state}}", json.dumps(game_state, indent=2)) \
                    .replace("{{characters}}", characters_text) \
