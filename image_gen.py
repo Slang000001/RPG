@@ -19,6 +19,9 @@ def generate_image(prompt: str, game_id: str) -> str | None:
         return None
 
     styled_prompt = IMAGE_STYLE_PREFIX + prompt
+    # DALL-E 3 has a 4000 char prompt limit
+    if len(styled_prompt) > 3900:
+        styled_prompt = styled_prompt[:3900]
 
     for attempt in range(3):
         try:
@@ -44,7 +47,9 @@ def generate_image(prompt: str, game_id: str) -> str | None:
                 time.sleep(wait)
                 continue
 
-            resp.raise_for_status()
+            if not resp.ok:
+                print(f"❌ DALL-E error {resp.status_code}: {resp.text[:300]}")
+                resp.raise_for_status()
             data = resp.json()
 
             image_url = data["data"][0]["url"]
