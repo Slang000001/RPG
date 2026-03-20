@@ -31,7 +31,7 @@ Respond with ONLY valid JSON matching this exact structure:
       "line": "What they say — in character, reactive to events. 1-2 sentences max."
     }
   ],
-  "image_prompt": "COPY-PASTE each visible character's EXACT appearance text from the characters list above into this prompt. Then describe the scene: environment, composition, action, mood. Do NOT invent new character descriptions — use the locked appearances verbatim.",
+  "image_prompt": "MUST be under 500 words. Include a concise summary of each visible character's key appearance traits (skin color, hair, clothing — 1 sentence each, not the full description). Then describe the scene: environment, composition, action, mood. Keep it tight.",
   "choices": [
     "First choice — a bold or aggressive option",
     "Second choice — a cautious or diplomatic option",

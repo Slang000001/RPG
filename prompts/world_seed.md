@@ -38,7 +38,7 @@ Respond with ONLY valid JSON matching this exact structure:
         "line": "What they say (1-3 sentences, in character)"
       }
     ],
-    "image_prompt": "A detailed visual description for image generation. ALWAYS include each character's full appearance description from above so they look consistent. Art style, composition, lighting, key elements. Do NOT reference narration text — describe the scene independently.",
+    "image_prompt": "MUST be under 500 words. Include a concise summary of each visible character's key appearance traits (skin color, hair, clothing — 1 sentence each). Then describe the scene: environment, composition, action, mood. Do NOT reference narration text.",
     "choices": [
       "First choice — a bold or aggressive option",
       "Second choice — a cautious or diplomatic option",
@@ -65,11 +65,11 @@ Respond with ONLY valid JSON matching this exact structure:
 ```
 
 Important rules:
-- The Player Character's appearance is LOCKED — use it verbatim in every image_prompt where the player is visible. The player does NOT get a voice_name (narration uses "you").
+- The Player Character's appearance is LOCKED — include a concise summary of their key traits in every image_prompt where visible. The player does NOT get a voice_name (narration uses "you").
 - Each NPC voice_name must be unique — don't assign the same voice to two NPCs
 - The opening narration should be immersive and draw the player in immediately
 - Each choice should lead to meaningfully different outcomes
 - Characters should speak in distinctive voices that match their personality
-- The image_prompt MUST include each visible character's full appearance description for visual consistency
+- The image_prompt MUST include concise character appearance summaries (1 sentence each) for visual consistency. Keep image_prompt under 500 words total.
 - The world_summary should contain enough context to drive 20+ turns of gameplay
 - Keep dialogue natural and in-character
