@@ -354,7 +354,8 @@
             <div class="form-group">
                 <label>Your Character</label>
                 <input type="text" id="player-name" placeholder="Your name in this world" required>
-                <input type="text" id="player-appearance" placeholder="Your appearance (e.g., tall man, dark skin, shaved head, leather armor, scar across left eye)" required style="margin-top: 0.5rem;">
+                <input type="text" id="player-appearance" maxlength="150" placeholder="Gender, build, skin, hair, clothing, weapon (e.g., 5ft Filipina woman, athletic, black ponytail, green cargo pants, black tank top, laser sword)" required style="margin-top: 0.5rem;">
+                <div style="color: var(--gray-text); font-size: 0.75rem; margin-top: 0.25rem;"><span id="appearance-count">0</span>/150 — include gender, build, hair, clothing, and signature item</div>
             </div>
             <div class="form-group">
                 <label>NPCs (1-3)</label>
@@ -363,7 +364,7 @@
                         <h3>Character 1</h3>
                         <div class="char-row">
                             <input type="text" placeholder="Name" class="char-name" required>
-                            <input type="text" placeholder="Brief description (e.g., a scarred bounty hunter)" class="char-desc" required>
+                            <input type="text" placeholder="Role + personality (e.g., a scarred bounty hunter, suspicious and quiet)" class="char-desc" maxlength="150" required>
                         </div>
                     </div>
                 </div>
@@ -521,7 +522,7 @@
             <h3>Character ${charCount + 1} <button type="button" class="btn-remove-char" onclick="removeCharacter(this)">&times; Remove</button></h3>
             <div class="char-row">
                 <input type="text" placeholder="Name" class="char-name" required>
-                <input type="text" placeholder="Brief description" class="char-desc" required>
+                <input type="text" placeholder="Role + personality" class="char-desc" maxlength="150" required>
             </div>`;
         c.appendChild(div);
         charCount++;
@@ -770,6 +771,11 @@
 
     // ===== UTILS =====
     function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    // ===== CHAR COUNT =====
+    document.getElementById('player-appearance').addEventListener('input', function() {
+        document.getElementById('appearance-count').textContent = this.value.length;
+    });
 
     // ===== INIT =====
     checkAuth();
