@@ -155,6 +155,22 @@ def _generate_and_update_media(turn_id: str, game_id: str, narration: str,
         print(f"❌ Background media gen failed for turn {turn_id}: {e}")
 
 
+def _generate_and_update_image(turn_id: str, game_id: str, image_prompt: str, face_urls: list = None):
+    """Background task: generate just the image and update the turn row."""
+    try:
+        image_url = generate_image(image_prompt, game_id, face_urls)
+        if image_url:
+            client = db.get_client()
+            client.table("gauntlet_turns").update({
+                "image_url": image_url
+            }).eq("id", turn_id).execute()
+            print(f"📸 Image updated for turn {turn_id}")
+        else:
+            print(f"⚠️ No image generated for turn {turn_id}")
+    except Exception as e:
+        print(f"❌ Background image gen failed for turn {turn_id}: {e}")
+
+
 def get_turn_media(turn_id: str) -> dict:
     """Check if media has been generated for a turn."""
     client = db.get_client()
@@ -302,21 +318,25 @@ def _build_turn_prompt(game: dict, game_state: dict, characters: list, choice_te
 
 def _precompute_single_choice(game_id: str, turn_number: int, choice_num: int,
                                game: dict, game_state: dict, characters: list, choice_text: str):
-    """Precompute a single choice: Claude call + full media generation."""
+    """Precompute a single choice: text + audio only (image generated when chosen)."""
     cache_key = (game_id, turn_number, choice_num)
     try:
         prompt = _build_turn_prompt(game, game_state, characters, choice_text)
         result = _call_llm(prompt)
 
-        # Generate full media for this branch
+        # Generate text + audio only — skip image to avoid rate limits and cost
+        # Image will be generated when the player actually chooses this branch
         media = _generate_turn_media(
             game_id, result.get("narration", ""),
             result.get("dialogue", []), characters,
-            result.get("image_prompt", ""), game_state
+            None, game_state  # None for image_prompt = skip image gen
         )
 
+        # Store the image_prompt so we can generate it later when chosen
+        media["_pending_image_prompt"] = result.get("image_prompt", "")
+
         _precomputed[cache_key] = {"result": result, "media": media}
-        print(f"✅ Precomputed choice {choice_num} (text+media) for turn {turn_number} of game {game_id[:8]}")
+        print(f"✅ Precomputed choice {choice_num} (text+audio) for turn {turn_number} of game {game_id[:8]}")
     except Exception as e:
         print(f"⚠️ Precompute failed for choice {choice_num}: {e}")
 
@@ -359,7 +379,7 @@ def process_turn(game_id: str, player_choice: int) -> dict:
     if cached:
         result = cached["result"]
         media = cached["media"]
-        print(f"⚡ Cache hit (text+media) for choice {player_choice} on turn {latest_turn['turn_number']}")
+        print(f"⚡ Cache hit (text+audio) for choice {player_choice} on turn {latest_turn['turn_number']}")
     else:
         # Cache miss — generate on the fly
         choice_text = choices[player_choice - 1] if 0 < player_choice <= len(choices) else "Unknown"
@@ -380,7 +400,7 @@ def process_turn(game_id: str, player_choice: int) -> dict:
             new_state[key] = game_state[key]
 
     if media:
-        # Full precompute — save turn WITH media
+        # Cache hit — save turn WITH audio, generate image in background
         turn_result = client.table("gauntlet_turns").insert({
             "game_id": game_id,
             "turn_number": new_turn_number,
@@ -388,10 +408,14 @@ def process_turn(game_id: str, player_choice: int) -> dict:
             "narration_text": result.get("narration", ""),
             "narration_audio_url": media["narration_audio_url"],
             "dialogue": media["dialogue"],
-            "image_url": media["image_url"],
             "image_prompt": result.get("image_prompt", ""),
             "choices": result.get("choices", []),
         }).execute()
+        # Generate image in background for just this chosen branch
+        pending_image_prompt = media.get("_pending_image_prompt", result.get("image_prompt", ""))
+        if pending_image_prompt:
+            _executor.submit(_generate_and_update_image, turn_result.data[0]["id"],
+                             game_id, pending_image_prompt, _get_face_urls(characters, new_state))
     else:
         # Cache miss — save text only, generate media in background
         dialogue_no_audio = [{"character_name": d.get("character_name", ""), "line": d.get("line", "")}
