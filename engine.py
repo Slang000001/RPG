@@ -143,6 +143,7 @@ def _generate_and_update_media(turn_id: str, game_id: str, narration: str,
     """Background task: generate media and update the turn row in DB."""
     try:
         media = _generate_turn_media(game_id, narration, dialogue, characters, image_prompt, game_state)
+        print(f"📸 Media result — image: {'YES' if media['image_url'] else 'NONE'}, narration: {'YES' if media['narration_audio_url'] else 'NONE'}, dialogue: {sum(1 for d in media['dialogue'] if d.get('audio_url'))}/{len(media['dialogue'])}")
         client = db.get_client()
         client.table("gauntlet_turns").update({
             "image_url": media["image_url"],
